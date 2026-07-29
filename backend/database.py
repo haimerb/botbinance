@@ -80,37 +80,40 @@ class ErrorLog(Base):
 
 def init_db():
     Base.metadata.create_all(engine)
-    session = get_session()
+    with get_session() as session:
+        for stmt in [
+            "ALTER TABLE trades ADD COLUMN IF NOT EXISTS symbol VARCHAR(20) DEFAULT 'BTCUSDT'",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS balance_allocation_pct FLOAT DEFAULT 100.0",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS ai_stop_loss_enabled INTEGER DEFAULT 0",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS ai_optimize_enabled INTEGER DEFAULT 0",
+        ]:
+            try:
+                session.execute(text(stmt))
+            except Exception:
+                session.rollback()
+
+
+from contextlib import contextmanager
+
+@contextmanager
+def get_session():
+    session = SessionLocal()
     try:
-        session.execute(text("ALTER TABLE trades ADD COLUMN IF NOT EXISTS symbol VARCHAR(20) DEFAULT 'BTCUSDT'"))
+        yield session
         session.commit()
-    except:
+    except Exception:
         session.rollback()
-    try:
-        session.execute(text("ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS balance_allocation_pct FLOAT DEFAULT 100.0"))
-        session.commit()
-    except:
-        session.rollback()
-    try:
-        session.execute(text("ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS ai_stop_loss_enabled INTEGER DEFAULT 0"))
-        session.commit()
-    except:
-        session.rollback()
-    try:
-        session.execute(text("ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS ai_optimize_enabled INTEGER DEFAULT 0"))
-        session.commit()
-    except:
-        session.rollback()
+        raise
     finally:
         session.close()
 
 
-def get_session():
+def get_session_simple():
     return SessionLocal()
 
 
 def add_user(email: str, password_hash: str) -> User:
-    session = get_session()
+    session = get_session_simple()
     user = User(email=email, password_hash=password_hash)
     session.add(user)
     session.commit()
@@ -120,32 +123,30 @@ def add_user(email: str, password_hash: str) -> User:
 
 
 def get_user_by_email(email: str):
-    session = get_session()
+    session = get_session_simple()
     user = session.query(User).filter(User.email == email).first()
     session.close()
     return user
 
 
 def get_user_by_id(user_id: int):
-    session = get_session()
+    session = get_session_simple()
     user = session.query(User).filter(User.id == user_id).first()
     session.close()
     return user
 
 
 def update_binance_keys(user_id: int, api_key: str, api_secret: str):
-    session = get_session()
-    session.query(User).filter(User.id == user_id).update({
-        "binance_api_key": api_key,
-        "binance_api_secret": api_secret,
-        "updated_at": datetime.now(),
-    })
-    session.commit()
-    session.close()
+    with get_session() as session:
+        session.query(User).filter(User.id == user_id).update({
+            "binance_api_key": api_key,
+            "binance_api_secret": api_secret,
+            "updated_at": datetime.now(),
+        })
 
 
 def get_or_create_user_config(user_id: int):
-    session = get_session()
+    session = get_session_simple()
     cfg = session.query(UserConfig).filter(UserConfig.user_id == user_id).first()
     if not cfg:
         cfg = UserConfig(user_id=user_id)
@@ -157,53 +158,49 @@ def get_or_create_user_config(user_id: int):
 
 
 def update_user_config(user_id: int, **kwargs):
-    session = get_session()
-    cfg = session.query(UserConfig).filter(UserConfig.user_id == user_id).first()
-    if not cfg:
-        cfg = UserConfig(user_id=user_id)
-        session.add(cfg)
-    for k, v in kwargs.items():
-        if hasattr(cfg, k):
-            setattr(cfg, k, v)
-    cfg.updated_at = datetime.now()
-    session.commit()
-    session.close()
+    with get_session() as session:
+        cfg = session.query(UserConfig).filter(UserConfig.user_id == user_id).first()
+        if not cfg:
+            cfg = UserConfig(user_id=user_id)
+            session.add(cfg)
+        for k, v in kwargs.items():
+            if hasattr(cfg, k):
+                setattr(cfg, k, v)
+        cfg.updated_at = datetime.now()
 
 
 def add_trade(user_id: int, side: str, price: float, qty: float, trade_type: str,
               pnl_pct: float = None, symbol: str = "BTCUSDT") -> int:
-    session = get_session()
-    trade = Trade(user_id=user_id, symbol=symbol, side=side, price=price, qty=qty,
-                  trade_type=trade_type, pnl_pct=pnl_pct)
-    session.add(trade)
-    session.commit()
-    trade_id = trade.id
-    session.close()
-    return trade_id
+    with get_session() as session:
+        trade = Trade(user_id=user_id, symbol=symbol, side=side, price=price, qty=qty,
+                      trade_type=trade_type, pnl_pct=pnl_pct)
+        session.add(trade)
+        session.flush()
+        trade_id = trade.id
+        return trade_id
 
 
 def get_trades(user_id: int, limit: int = 50) -> list:
-    session = get_session()
-    rows = session.query(Trade).filter(Trade.user_id == user_id) \
-        .order_by(Trade.id.desc()).limit(limit).all()
-    session.close()
-    return [
-        {
-            "id": r.id,
-            "side": r.side,
-            "symbol": r.symbol,
-            "price": r.price,
-            "qty": r.qty,
-            "type": r.trade_type,
-            "pnl_pct": r.pnl_pct,
-            "timestamp": r.timestamp.isoformat() if r.timestamp else None,
-        }
-        for r in rows
-    ]
+    with get_session() as session:
+        rows = session.query(Trade).filter(Trade.user_id == user_id) \
+            .order_by(Trade.id.desc()).limit(limit).all()
+        return [
+            {
+                "id": r.id,
+                "side": r.side,
+                "symbol": r.symbol,
+                "price": r.price,
+                "qty": r.qty,
+                "type": r.trade_type,
+                "pnl_pct": r.pnl_pct,
+                "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+            }
+            for r in rows
+        ]
 
 
 def get_trade_stats(user_id: int) -> dict:
-    session = get_session()
+    session = get_session_simple()
     rows = session.query(Trade).filter(Trade.user_id == user_id).all()
     session.close()
     exits = [r for r in rows if r.trade_type in ("exit", "stop_loss", "take_profit") and r.pnl_pct is not None]
@@ -224,28 +221,25 @@ def get_trade_stats(user_id: int) -> dict:
 
 
 def get_recent_trades(user_id: int, since_id: int = 0) -> list:
-    session = get_session()
-    rows = session.query(Trade).filter(Trade.user_id == user_id, Trade.id > since_id) \
-        .order_by(Trade.id.asc()).all()
-    session.close()
-    return [
-        {
-            "id": r.id,
-            "side": r.side,
-            "symbol": r.symbol,
-            "price": r.price,
-            "qty": r.qty,
-            "type": r.trade_type,
-            "pnl_pct": r.pnl_pct,
-            "timestamp": r.timestamp.isoformat() if r.timestamp else None,
-        }
-        for r in rows
-    ]
+    with get_session() as session:
+        rows = session.query(Trade).filter(Trade.user_id == user_id, Trade.id > since_id) \
+            .order_by(Trade.id.asc()).all()
+        return [
+            {
+                "id": r.id,
+                "side": r.side,
+                "symbol": r.symbol,
+                "price": r.price,
+                "qty": r.qty,
+                "type": r.trade_type,
+                "pnl_pct": r.pnl_pct,
+                "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+            }
+            for r in rows
+        ]
 
 
 def log_error(user_id: int | None, message: str):
-    session = get_session()
-    err = ErrorLog(user_id=user_id, message=message)
-    session.add(err)
-    session.commit()
-    session.close()
+    with get_session() as session:
+        err = ErrorLog(user_id=user_id, message=message)
+        session.add(err)

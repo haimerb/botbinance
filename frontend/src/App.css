@@ -162,6 +162,7 @@ header h1 {
 }
 .badge.running { background: var(--green-glow); color: var(--green); }
 .badge.stopped { background: var(--red-glow); color: var(--red); }
+.badge.mock { background: rgba(96, 165, 250, 0.12); color: var(--blue); }
 .badge-dot {
   width: 5px; height: 5px; border-radius: 50%;
   background: currentColor;
