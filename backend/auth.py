@@ -5,7 +5,13 @@ from datetime import datetime, timedelta
 from fastapi import HTTPException, Header
 from typing import Optional
 
-JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-key-cambiar-en-produccion")
+JWT_SECRET = os.getenv("JWT_SECRET", "")
+if not JWT_SECRET:
+    raise RuntimeError(
+        "JWT_SECRET no configurado. "
+        "Genera uno seguro con: python -c \"import secrets; print(secrets.token_urlsafe(32))\" "
+        "y añádelo a tu archivo .env"
+    )
 JWT_ALGO = "HS256"
 JWT_EXPIRATION_HOURS = 24
 
