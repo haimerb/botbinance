@@ -1,0 +1,91 @@
+# Sistema operativo
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Icon?
+
+# Archivos de editor/IDE
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.swp
+*.tmp
+*.temp
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json*
+yarn.lock*
+.pnpm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.pyd
+*.pdb
+*.egg-info/
+*.egg
+env/
+venv/
+.venv/
+
+# Archivos de compilación y binarios
+build/
+dist/
+out/
+*.exe
+*.dll
+*.so
+*.dylib
+*.class
+*.jar
+*.war
+*.ear
+*.o
+*.obj
+*.out
+*.app
+
+# Registros y temporales
+*.log
+*.log.*
+*.tmp
+*.temp
+*.cache
+*.bak
+*.swp
+*.swo
+*.lock
+
+# Archivos comprimidos y paquetes
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+*.gz
+*.bz2
+*.xz
+
+# Otros
+.env
+.env.example
+*.env
+bot.db
+*.db
+*.sqlite
+*.sqlite3
+.DS_Store
+Thumbs.db
+desktop.ini
