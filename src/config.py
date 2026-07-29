@@ -1,0 +1,25 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
+BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
+USE_TESTNET = os.getenv("USE_TESTNET", "true").lower() == "true"
+
+DEFAULT_SYMBOLS = ["BTCUSDT"]
+INTERVAL = "1h"
+LOOKBACK_LIMIT = 500
+
+TRADE_QUANTITY = 0.001
+STOP_LOSS_PCT = 0.02
+TAKE_PROFIT_PCT = 0.03
+MAX_POSITION_SIZE = 0.01
+
+MA_FAST_PERIOD = 9
+MA_SLOW_PERIOD = 21
+ML_CONFIDENCE_THRESHOLD = 0.55
+ML_HIGH_CONFIDENCE = 0.7
+BALANCE_ALLOCATION_PCT = 100
+
+MODEL_PATH = "src/models/trained_model.pkl"
