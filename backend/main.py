@@ -1,5 +1,6 @@
 import os
-from fastapi import FastAPI, HTTPException, Depends, Query
+import asyncio
+from fastapi import FastAPI, HTTPException, Depends, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from binance.client import Client
@@ -186,6 +187,26 @@ def get_recent_trades_api(
     since_id: int = Query(0, ge=0),
 ):
     return {"trades": get_recent_trades(current_user["sub"], since_id), "since_id": since_id}
+
+
+connected_ws = set()
+
+
+@app.websocket("/api/ws")
+async def websocket_endpoint(ws: WebSocket):
+    await ws.accept()
+    connected_ws.add(ws)
+    try:
+        while True:
+            state = bot.get_state()
+            await ws.send_json(state)
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        connected_ws.discard(ws)
 
 
 @app.get("/api/config/suggest")
