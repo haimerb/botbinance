@@ -1,15 +1,12 @@
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 import pandas as pd
-import numpy as np
 import joblib
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.model_selection import RandomizedSearchCV
+from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier, StackingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline
 import xgboost as xgb
@@ -141,6 +138,7 @@ def _build_base_estimators():
         ("xgb", xgb.XGBClassifier(
             objective="binary:logistic", eval_metric="logloss",
             random_state=42, n_jobs=-1, max_delta_step=1,
+            early_stopping_rounds=50,
         )),
     ]
     if HAS_LGBM:
@@ -194,22 +192,16 @@ def train_direction_model(X_train, y_train, X_test, y_test):
         pipeline, param_grid, n_iter=8, cv=tscv,
         scoring="accuracy", random_state=42, n_jobs=-1, verbose=0,
     )
-    search.fit(X_train, y_train)
 
-    print("\n--- Validación Cruzada (por fold) ---")
-    for i, (train_idx, val_idx) in enumerate(tscv.split(X_train)):
-        fold_pipe = ImbPipeline([
-            ("smote", SMOTE(random_state=42)),
-            ("scaler", StandardScaler()),
-            ("stack", _make_stacking()),
-        ])
-        fold_pipe.set_params(**search.best_params_)
-        fold_pipe.fit(X_train[train_idx], y_train[train_idx])
-        fold_acc = accuracy_score(y_train[val_idx], fold_pipe.predict(X_train[val_idx]))
-        print(f"  Fold {i+1}: {fold_acc:.2%}")
+    search.fit(X_train, y_train)
 
     best = search.best_estimator_
     print(f"\nMejores params: {search.best_params_}")
+
+    cv_results = search.cv_results_
+    for i in range(tscv.n_splits):
+        fold_scores = [cv_results[f"split{i}_test_score"][j] for j in range(len(cv_results["params"]))]
+        print(f"  Fold {i+1}: {max(fold_scores):.2%}")
 
     y_pred = best.predict(X_test)
     acc = accuracy_score(y_test, y_pred)
@@ -243,25 +235,52 @@ def train_volatility_model(X_train, y_train, X_test, y_test):
     return pipeline
 
 
-def train_model():
+def fetch_multi_symbol_data(symbols=None, interval=None, limit=5000):
+    client = BinanceDataClient()
+    if symbols is None:
+        symbols = DEFAULT_SYMBOLS
+    if interval is None:
+        interval = INTERVAL
+
+    all_dfs = []
+    for sym in symbols:
+        print(f"  Descargando {sym}...")
+        df = client.fetch_klines(sym, interval, limit, use_real_api=True)
+        if df.empty:
+            print(f"    Fallback a testnet para {sym}...")
+            df = client.fetch_klines(sym, interval, min(limit, 2000))
+        if not df.empty:
+            all_dfs.append(df)
+        else:
+            print(f"    Sin datos para {sym}")
+    return all_dfs
+
+
+def train_model(symbols=None, interval=None, limit=5000):
     print("=" * 50)
     print("  ENTRENAMIENTO ML DEFINITIVO")
     print("=" * 50)
 
-    print("\nObteniendo datos históricos (real API)...")
-    client = BinanceDataClient()
-    df = client.fetch_klines(DEFAULT_SYMBOLS[0], INTERVAL, 5000, use_real_api=True)
-    if df.empty:
-        print("Fallback a testnet...")
-        df = client.fetch_klines(DEFAULT_SYMBOLS[0], INTERVAL, 2000)
-    if df.empty:
+    if symbols is None:
+        symbols = DEFAULT_SYMBOLS
+
+    print(f"\nSímbolos: {symbols}")
+    print(f"Intervalo: {interval or INTERVAL}")
+
+    print("\nObteniendo datos históricos...")
+    dfs = fetch_multi_symbol_data(symbols, interval, limit)
+    if not dfs:
         print("Sin datos.")
         return
 
-    print(f"Velas: {len(df)} ({df.timestamp.iloc[0].date()} -> {df.timestamp.iloc[-1].date()})")
+    all_processed = []
+    for i, df in enumerate(dfs):
+        print(f"\nProcesando {symbols[i] if i < len(symbols) else 'desconocido'}: {len(df)} velas")
+        processed = prepare_training_data(df)
+        all_processed.append(processed)
 
-    df = prepare_training_data(df)
-    print(f"Muestras: {len(df)}")
+    df = pd.concat(all_processed, ignore_index=True)
+    print(f"\nTotal muestras combinadas: {len(df)}")
 
     up = df["target"].sum()
     down = len(df) - up
@@ -289,9 +308,20 @@ def train_model():
         "dir_model": dir_model,
         "vol_pipeline": vol_pipeline,
         "features": FEATURE_COLS,
+        "symbols": symbols,
+        "interval": interval or INTERVAL,
     }, MODEL_PATH)
     print(f"\nModelos guardados en {MODEL_PATH}")
 
 
 if __name__ == "__main__":
-    train_model()
+    import argparse
+    parser = argparse.ArgumentParser(description="Entrenar modelo ML para binance bot")
+    parser.add_argument("--symbols", nargs="+", default=DEFAULT_SYMBOLS,
+                        help="Símbolos para entrenar (ej: BTCUSDT ETHUSDT)")
+    parser.add_argument("--interval", default=INTERVAL,
+                        help="Intervalo de velas (ej: 1h, 4h, 1d)")
+    parser.add_argument("--limit", type=int, default=5000,
+                        help="Límite de velas por símbolo")
+    args = parser.parse_args()
+    train_model(symbols=args.symbols, interval=args.interval, limit=args.limit)
