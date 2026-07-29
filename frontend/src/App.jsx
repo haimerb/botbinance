@@ -782,7 +782,7 @@ function Dashboard({ user, onLogout, onAccount }) {
         <MetricCard title="Señal MA" value={primarySig.ma || 'HOLD'}
           sub="Media Móvil" trend={primarySig.ma === 'BUY' ? 'up' : primarySig.ma === 'SELL' ? 'down' : ''} />
         <MetricCard title="Señal ML" value={primarySig.ml || 'HOLD'}
-          sub="XGBoost" trend={primarySig.ml === 'BUY' ? 'up' : primarySig.ml === 'SELL' ? 'down' : ''} />
+          sub="Stacking Ensemble" trend={primarySig.ml === 'BUY' ? 'up' : primarySig.ml === 'SELL' ? 'down' : ''} />
         <MetricCard title="Balance Total" value={`$${(state?.total_balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
           sub={`Asignado: $${(state?.balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
           trend={state?.pnl >= 0 ? 'up' : 'down'} />
