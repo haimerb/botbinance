@@ -10,3 +10,5 @@ sqlalchemy==2.0.25
 psycopg2-binary==2.9.12
 bcrypt==5.0.0
 pyjwt==2.10.1
+lightgbm==4.1.0
+catboost==1.2.5
