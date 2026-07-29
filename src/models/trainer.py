@@ -1,14 +1,31 @@
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
 import pandas as pd
 import numpy as np
 import joblib
 from sklearn.model_selection import TimeSeriesSplit
+from sklearn.model_selection import RandomizedSearchCV
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import RandomizedSearchCV
+from sklearn.ensemble import RandomForestClassifier, StackingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline
 import xgboost as xgb
+
+try:
+    import lightgbm as lgb
+    HAS_LGBM = True
+except ImportError:
+    HAS_LGBM = False
+
+try:
+    from catboost import CatBoostClassifier
+    HAS_CAT = True
+except ImportError:
+    HAS_CAT = False
+
 from src.config import MODEL_PATH, DEFAULT_SYMBOLS, INTERVAL
 from src.data.binance_client import BinanceDataClient
 
@@ -100,7 +117,7 @@ FEATURE_COLS = [
 ]
 
 
-def prepare_training_data(df: pd.DataFrame) -> tuple:
+def prepare_training_data(df: pd.DataFrame) -> pd.DataFrame:
     df = add_technical_features(df)
 
     for h in [3, 6, 12]:
@@ -119,63 +136,80 @@ def prepare_training_data(df: pd.DataFrame) -> tuple:
     return df
 
 
-def train_direction_model(X_train, y_train, X_test, y_test):
-    print("\n--- Modelo de DIRECCIÓN ---")
-
-    pipeline = ImbPipeline([
-        ("smote", SMOTE(random_state=42)),
-        ("scaler", StandardScaler()),
+def _build_base_estimators():
+    est = [
         ("xgb", xgb.XGBClassifier(
             objective="binary:logistic", eval_metric="logloss",
             random_state=42, n_jobs=-1, max_delta_step=1,
         )),
+    ]
+    if HAS_LGBM:
+        est.append(("lgbm", lgb.LGBMClassifier(
+            objective="binary", random_state=42, n_jobs=-1, verbose=-1,
+        )))
+    if HAS_CAT:
+        est.append(("cat", CatBoostClassifier(
+            loss_function="Logloss", random_seed=42, verbose=0,
+        )))
+    return est
+
+
+def _make_stacking() -> StackingClassifier:
+    return StackingClassifier(
+        estimators=_build_base_estimators(),
+        final_estimator=LogisticRegression(random_state=42, C=1.0, max_iter=1000),
+        cv=3,
+        stack_method="predict_proba",
+        n_jobs=-1,
+    )
+
+
+def train_direction_model(X_train, y_train, X_test, y_test):
+    print("\n--- Modelo de DIRECCIÓN (Stacking Ensemble) ---")
+
+    pipeline = ImbPipeline([
+        ("smote", SMOTE(random_state=42)),
+        ("scaler", StandardScaler()),
+        ("stack", _make_stacking()),
     ])
 
+    print(f"  Base learners: {[n for n, _ in _build_base_estimators()]}")
+    print(f"  Meta learner: LogisticRegression")
+
     param_grid = {
-        "xgb__n_estimators": [150, 250, 350],
-        "xgb__max_depth": [3, 5, 7],
-        "xgb__learning_rate": [0.03, 0.05, 0.1],
-        "xgb__subsample": [0.65, 0.8, 0.95],
-        "xgb__colsample_bytree": [0.6, 0.8],
-        "xgb__min_child_weight": [1, 3, 5],
-        "xgb__gamma": [0, 0.1, 0.2],
-        "xgb__reg_alpha": [0, 0.01, 0.1],
-        "xgb__reg_lambda": [0.1, 1, 5],
+        "stack__xgb__n_estimators": [150, 300],
+        "stack__xgb__max_depth": [3, 6],
+        "stack__xgb__learning_rate": [0.03, 0.07],
+        "stack__final_estimator__C": [0.1, 1.0, 10.0],
     }
+    if HAS_LGBM:
+        param_grid["stack__lgbm__num_leaves"] = [31, 63]
+        param_grid["stack__lgbm__learning_rate"] = [0.03, 0.07]
+    if HAS_CAT:
+        param_grid["stack__cat__depth"] = [4, 7]
+        param_grid["stack__cat__learning_rate"] = [0.03, 0.07]
 
     tscv = TimeSeriesSplit(n_splits=3)
     search = RandomizedSearchCV(
-        pipeline, param_grid, n_iter=30, cv=tscv,
+        pipeline, param_grid, n_iter=8, cv=tscv,
         scoring="accuracy", random_state=42, n_jobs=-1, verbose=0,
     )
     search.fit(X_train, y_train)
 
     print("\n--- Validación Cruzada (por fold) ---")
     for i, (train_idx, val_idx) in enumerate(tscv.split(X_train)):
-        X_fold_train, X_fold_val = X_train[train_idx], X_train[val_idx]
-        y_fold_train, y_fold_val = y_train[train_idx], y_train[val_idx]
         fold_pipe = ImbPipeline([
             ("smote", SMOTE(random_state=42)),
             ("scaler", StandardScaler()),
-            ("xgb", xgb.XGBClassifier(
-                **{k.split("__", 1)[1]: v for k, v in search.best_params_.items()},
-                objective="binary:logistic", eval_metric="logloss",
-                random_state=42, n_jobs=-1,
-            )),
+            ("stack", _make_stacking()),
         ])
-        fold_pipe.fit(X_fold_train, y_fold_train)
-        fold_acc = accuracy_score(y_fold_val, fold_pipe.predict(X_fold_val))
+        fold_pipe.set_params(**search.best_params_)
+        fold_pipe.fit(X_train[train_idx], y_train[train_idx])
+        fold_acc = accuracy_score(y_train[val_idx], fold_pipe.predict(X_train[val_idx]))
         print(f"  Fold {i+1}: {fold_acc:.2%}")
 
     best = search.best_estimator_
     print(f"\nMejores params: {search.best_params_}")
-
-    xgb_model = best.named_steps["xgb"]
-    importances = xgb_model.feature_importances_
-    feat_imp = sorted(zip(FEATURE_COLS, importances), key=lambda x: -x[1])
-    print("\n--- Feature Importance ---")
-    for name, imp in feat_imp[:10]:
-        print(f"  {name}: {imp:.3f}")
 
     y_pred = best.predict(X_test)
     acc = accuracy_score(y_test, y_pred)

@@ -44,12 +44,8 @@ class MLStrategy:
 
         X = latest[FEATURE_COLS].values
 
-        if hasattr(self.dir_model, "named_steps"):
-            pred = self.dir_model.predict(X)[0]
-            proba = self.dir_model.predict_proba(X)[0]
-        else:
-            pred = self.dir_model.predict(X)[0]
-            proba = self.dir_model.predict_proba(X)[0]
+        pred = self.dir_model.predict(X)[0]
+        proba = self.dir_model.predict_proba(X)[0]
 
         confidence = max(proba)
 
