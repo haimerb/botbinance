@@ -1,0 +1,7 @@
+{
+  "name": "binance-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "App de escritorio (Electron) del bot de trading de Binance",
+  "main": "electron/main.js"
+}
