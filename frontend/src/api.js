@@ -1,4 +1,7 @@
-const BASE = '/api'
+const electronBackend = window.electronAPI && window.electronAPI.backendUrl
+  ? `${window.electronAPI.backendUrl.replace(/\/+$/, '')}/api`
+  : null
+const BASE = electronBackend || '/api'
 
 export function getToken() { return localStorage.getItem('token') }
 
@@ -96,6 +99,12 @@ export function suggestConfig() {
 }
 
 function getWsUrl() {
+  if (electronBackend) {
+    const origin = electronBackend.replace(/\/api$/, '')
+    const proto = origin.startsWith('https') ? 'wss:' : 'ws:'
+    const host = origin.replace(/^https?:\/\//, '')
+    return `${proto}//${host}/api/ws`
+  }
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host
   return `${proto}//${host}/api/ws`

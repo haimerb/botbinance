@@ -1,29 +1,22 @@
 const { app, BrowserWindow, Menu } = require('electron')
 const path = require('path')
-const { spawn } = require('child_process')
+const fs = require('fs')
 
 let mainWindow
-let backendProcess
 
 const isDev = process.env.NODE_ENV === 'development'
-const BACKEND_PORT = 8000
 const FRONTEND_PORT = 5173
 
-function startBackend() {
-  const python = process.platform === 'win32' ? 'python' : 'python3'
-  backendProcess = spawn(python, [
-    '-m', 'uvicorn', 'backend.main:app',
-    '--host', '0.0.0.0', '--port', String(BACKEND_PORT),
-  ], {
-    cwd: path.join(__dirname, '..'),
-    stdio: 'pipe',
-  })
-  backendProcess.stdout.on('data', (data) => {
-    console.log(`[backend] ${data}`)
-  })
-  backendProcess.stderr.on('data', (data) => {
-    console.error(`[backend] ${data}`)
-  })
+function getBackendUrl() {
+  if (process.env.BACKEND_URL) {
+    return process.env.BACKEND_URL.replace(/\/+$/, '')
+  }
+  const configPath = path.join(app.getPath('userData'), 'config.json')
+  try {
+    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+    if (cfg.backendUrl) return String(cfg.backendUrl).replace(/\/+$/, '')
+  } catch {}
+  return 'http://localhost:8000'
 }
 
 function createWindow() {
@@ -38,6 +31,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
+      additionalArguments: [`--backend-url=${getBackendUrl()}`],
     },
   })
 
@@ -76,14 +70,10 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  startBackend()
-  setTimeout(createWindow, 2000)
+  createWindow()
 })
 
 app.on('window-all-closed', () => {
-  if (backendProcess) {
-    backendProcess.kill()
-  }
   if (process.platform !== 'darwin') {
     app.quit()
   }
@@ -92,11 +82,5 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (mainWindow === null) {
     createWindow()
-  }
-})
-
-app.on('before-quit', () => {
-  if (backendProcess) {
-    backendProcess.kill()
   }
 })
