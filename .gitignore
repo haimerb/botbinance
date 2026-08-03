@@ -42,6 +42,7 @@ venv/
 # Archivos de compilación y binarios
 build/
 dist/
+release/
 out/
 *.exe
 *.dll
