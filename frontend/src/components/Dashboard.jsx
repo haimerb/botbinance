@@ -231,6 +231,8 @@ function Dashboard({ user, onLogout, onAccount }) {
         <MetricCard title="Balance Total" value={`$${(state?.total_balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
           sub={`Asignado: $${(state?.balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
           trend={state?.pnl >= 0 ? 'up' : 'down'} />
+        <MetricCard title="P&L Acumulado" value={`${(state?.total_pnl ?? 0) >= 0 ? '+' : '-'}$${Math.abs(state?.total_pnl ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+          sub="Realizado + no realizado" trend={(state?.total_pnl ?? 0) >= 0 ? 'up' : 'down'} />
         <MetricCard title="Posición" value={positions[activeSymbol] ? 'Activa' : '—'}
           sub={positions[activeSymbol] ? `Entry: $${positions[activeSymbol].entry?.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : 'Esperando'}
           trend={positions[activeSymbol] ? 'up' : ''} />
