@@ -80,9 +80,11 @@ out/
 
 # Otros
 .env
-.env.example
 *.env
 bot.db
+
+# Instrucciones de trabajo locales (no versionar)
+AGENTS.md
 *.db
 *.sqlite
 *.sqlite3
