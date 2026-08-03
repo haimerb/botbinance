@@ -1,3 +1,4 @@
+import hashlib
 import pandas as pd
 import joblib
 from src.config import MODEL_PATH
@@ -13,6 +14,7 @@ class MLStrategy:
         self.model_path = model_path
         self.confidence_threshold = confidence_threshold
         self.high_confidence = high_confidence
+        self._feature_cache = {}
         self._load_model()
 
     def _load_model(self):
@@ -26,8 +28,14 @@ class MLStrategy:
             print("Modelo ML no encontrado. Ejecuta train_model.py")
 
     def _prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        df = add_technical_features(df)
-        return df.dropna()
+        df_hash = hashlib.md5(pd.util.hash_pandas_object(df).values.tobytes()).hexdigest()
+        if df_hash in self._feature_cache:
+            return self._feature_cache[df_hash]
+        result = add_technical_features(df).dropna()
+        self._feature_cache[df_hash] = result
+        if len(self._feature_cache) > 100:
+            self._feature_cache.clear()
+        return result
 
     def generate_signal(self, df: pd.DataFrame) -> str:
         if self.dir_model is None:
