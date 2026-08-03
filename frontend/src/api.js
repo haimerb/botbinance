@@ -64,7 +64,7 @@ export function stopBot() {
   return request('/stop', { method: 'POST' })
 }
 
-export function getTrades(limit = 50) {
+export function getTrades(limit = 5) {
   return request(`/trades?limit=${limit}`)
 }
 
@@ -94,3 +94,48 @@ export function getRecentTrades(sinceId = 0) {
 export function suggestConfig() {
   return request('/config/suggest')
 }
+
+function getWsUrl() {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const host = window.location.host
+  return `${proto}//${host}/api/ws`
+}
+
+let ws = null
+let wsCallbacks = new Set()
+
+export function connectWs(onUpdate) {
+  wsCallbacks.add(onUpdate)
+  if (ws && ws.readyState === WebSocket.OPEN) return
+  if (ws) ws.close()
+
+  ws = new WebSocket(getWsUrl())
+  let reconnectTimer = null
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      wsCallbacks.forEach(cb => cb(data))
+    } catch {}
+  }
+
+  ws.onclose = () => {
+    ws = null
+    if (wsCallbacks.size > 0) {
+      reconnectTimer = setTimeout(() => connectWs(), 3000)
+    }
+  }
+
+  ws.onerror = () => {
+    ws.close()
+  }
+}
+
+export function disconnectWs(onUpdate) {
+  wsCallbacks.delete(onUpdate)
+  if (wsCallbacks.size === 0 && ws) {
+    ws.close()
+    ws = null
+  }
+}
+
