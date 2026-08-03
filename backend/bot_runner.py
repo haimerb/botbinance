@@ -22,8 +22,10 @@ class BotRunner:
         self.thread = None
         self.user_id = None
         self.config = {}
+        self._lock = threading.Lock()
         self.state = {
             "status": "stopped",
+            "mock_mode": mock_mode,
             "symbols": list(DEFAULT_SYMBOLS),
             "current_prices": {},
             "positions": {},
@@ -79,6 +81,10 @@ class BotRunner:
     def _mock_trade_logic(self, symbol: str, price: float, signal: str, qty: float):
         pos = self.state["positions"].get(symbol)
         if signal == "BUY" and not pos:
+            cost = price * qty
+            if self.state["balance"] < cost:
+                return
+            self.state["balance"] -= cost
             self.state["positions"][symbol] = {
                 "side": "BUY", "entry": price, "qty": qty,
                 "time": datetime.now().isoformat(),
@@ -91,9 +97,10 @@ class BotRunner:
             pnl_pct = (price - entry) / entry * 100
             self.state["balance"] += price * qty
             self.state["pnl"] += (price - entry) * qty
-            self.state["total_balance"] = self.state["balance"] + sum(
+            total_pos_value = sum(
                 p.get("entry", 0) * p.get("qty", 0) for p in self.state["positions"].values() if p
-            )
+            ) if any(self.state["positions"].values()) else 0
+            self.state["total_balance"] = self.state["balance"] + total_pos_value
             self.state["positions"][symbol] = None
             if self.user_id:
                 tid = add_trade(self.user_id, "SELL", price, qty, "exit", round(pnl_pct, 2), symbol=symbol)
@@ -106,14 +113,15 @@ class BotRunner:
             if not symbols:
                 time.sleep(2)
                 continue
-            for sym in symbols:
-                price = self._mock_tick(sym)
-                ma_sig, ml_sig, consensus = self._mock_signal()
-                self.state["current_prices"][sym] = price
-                self.state["signals"][sym] = {"ma": ma_sig, "ml": ml_sig, "consensus": consensus}
-                qty = self.config.get("trade_quantity", TRADE_QUANTITY)
-                self._mock_trade_logic(sym, price, consensus, qty)
-            self.state["last_update"] = datetime.now().isoformat()
+            with self._lock:
+                for sym in symbols:
+                    price = self._mock_tick(sym)
+                    ma_sig, ml_sig, consensus = self._mock_signal()
+                    self.state["current_prices"][sym] = price
+                    self.state["signals"][sym] = {"ma": ma_sig, "ml": ml_sig, "consensus": consensus}
+                    qty = self.config.get("trade_quantity", TRADE_QUANTITY)
+                    self._mock_trade_logic(sym, price, consensus, qty)
+                self.state["last_update"] = datetime.now().isoformat()
             time.sleep(2)
 
     def _run_live(self):
@@ -137,9 +145,10 @@ class BotRunner:
             )
             executor = TradeExecutor()
 
-            self.state["status"] = "running"
+            with self._lock:
+                self.state["status"] = "running"
             while self.running:
-                symbols = self.state["symbols"]
+                symbols = list(self.state["symbols"])
                 if not symbols:
                     time.sleep(10)
                     continue
@@ -157,8 +166,9 @@ class BotRunner:
                     if price == 0.0:
                         continue
 
-                    self.state["current_prices"][sym] = price
-                    self.state["signals"][sym] = {"ma": ma_signal, "ml": ml_signal, "consensus": consensus}
+                    with self._lock:
+                        self.state["current_prices"][sym] = price
+                        self.state["signals"][sym] = {"ma": ma_signal, "ml": ml_signal, "consensus": consensus}
 
                     rm = self._risk_managers.get(sym)
                     if not rm:
@@ -181,50 +191,60 @@ class BotRunner:
                         rm.set_dynamic_levels(sl, tp)
 
                     qty = cfg.get("trade_quantity", TRADE_QUANTITY)
-                    pos = self.state["positions"].get(sym)
 
                     if rm.has_position():
                         if rm.check_stop_loss(price):
                             executor.execute_order("SELL", qty, sym)
                             rm.close_position()
-                            self.state["positions"][sym] = None
+                            with self._lock:
+                                self.state["positions"][sym] = None
                             if self.user_id:
                                 tid = add_trade(self.user_id, "SELL", price, qty, "stop_loss", symbol=sym)
-                                self.state["last_trade_id"] = tid
+                                with self._lock:
+                                    self.state["last_trade_id"] = tid
                         elif rm.check_take_profit(price):
                             executor.execute_order("SELL", qty, sym)
                             rm.close_position()
-                            self.state["positions"][sym] = None
+                            with self._lock:
+                                self.state["positions"][sym] = None
                             if self.user_id:
                                 tid = add_trade(self.user_id, "SELL", price, qty, "take_profit", symbol=sym)
-                                self.state["last_trade_id"] = tid
+                                with self._lock:
+                                    self.state["last_trade_id"] = tid
                     elif consensus == "BUY":
                         if rm.open_position(price, qty):
                             executor.execute_order("BUY", qty, sym)
-                            self.state["positions"][sym] = {
-                                "side": "BUY", "entry": price, "qty": qty,
-                                "time": datetime.now().isoformat(),
-                            }
+                            with self._lock:
+                                self.state["positions"][sym] = {
+                                    "side": "BUY", "entry": price, "qty": qty,
+                                    "time": datetime.now().isoformat(),
+                                }
                             if self.user_id:
                                 tid = add_trade(self.user_id, "BUY", price, qty, "entry", symbol=sym)
-                                self.state["last_trade_id"] = tid
+                                with self._lock:
+                                    self.state["last_trade_id"] = tid
                     elif consensus == "SELL" and rm.has_position():
                         executor.execute_order("SELL", qty, sym)
                         rm.close_position()
-                        self.state["positions"][sym] = None
+                        with self._lock:
+                            self.state["positions"][sym] = None
                         if self.user_id:
                             tid = add_trade(self.user_id, "SELL", price, qty, "exit", symbol=sym)
-                            self.state["last_trade_id"] = tid
+                            with self._lock:
+                                self.state["last_trade_id"] = tid
 
-                    total_pos_value = sum(
-                        p.get("entry", 0) * p.get("qty", 0) for p in self.state["positions"].values() if p
-                    )
-                    self.state["total_balance"] = self.state["balance"] + total_pos_value
+                    with self._lock:
+                        total_pos_value = sum(
+                            p.get("entry", 0) * p.get("qty", 0) for p in self.state["positions"].values() if p
+                        )
+                        self.state["total_balance"] = self.state["balance"] + total_pos_value
 
-                self.state["last_update"] = datetime.now().isoformat()
+                with self._lock:
+                    self.state["last_update"] = datetime.now().isoformat()
                 time.sleep(60)
         except Exception as e:
-            self.state["status"] = f"error: {e}"
+            with self._lock:
+                self.state["status"] = f"error: {e}"
 
     def _run_loop(self):
         if self.mock_mode:
@@ -243,8 +263,16 @@ class BotRunner:
         self.running = False
         self.state["status"] = "stopped"
 
+    def _update_state(self, **kwargs):
+        with self._lock:
+            self.state.update(kwargs)
+
+    def _get_state_copy(self):
+        with self._lock:
+            return dict(self.state)
+
     def get_state(self):
-        s = dict(self.state)
+        s = self._get_state_copy()
         first_sym = s["symbols"][0] if s["symbols"] else "BTCUSDT"
         s["current_price"] = s["current_prices"].get(first_sym, 0.0)
         s["position"] = s["positions"].get(first_sym)
