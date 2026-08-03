@@ -32,6 +32,7 @@ class BotRunner:
             "signals": {},
             "balance": 10000.0,
             "pnl": 0.0,
+            "total_pnl": 0.0,
             "total_balance": 10000.0,
             "model_accuracy": 38.78,
             "last_update": None,
@@ -78,6 +79,19 @@ class BotRunner:
         consensus = ma if ma == ml and ma != "HOLD" else "HOLD"
         return ma, ml, consensus
 
+    def _refresh_pnl_and_balance(self):
+        unrealized = 0.0
+        total_pos_value = 0.0
+        for sym, pos in self.state["positions"].items():
+            if not pos:
+                continue
+            price = self.state["current_prices"].get(sym, pos["entry"])
+            qty = pos.get("qty", 0)
+            unrealized += (price - pos["entry"]) * qty
+            total_pos_value += price * qty
+        self.state["total_pnl"] = self.state["pnl"] + unrealized
+        self.state["total_balance"] = self.state["balance"] + total_pos_value
+
     def _mock_trade_logic(self, symbol: str, price: float, signal: str, qty: float):
         pos = self.state["positions"].get(symbol)
         if signal == "BUY" and not pos:
@@ -97,10 +111,6 @@ class BotRunner:
             pnl_pct = (price - entry) / entry * 100
             self.state["balance"] += price * qty
             self.state["pnl"] += (price - entry) * qty
-            total_pos_value = sum(
-                p.get("entry", 0) * p.get("qty", 0) for p in self.state["positions"].values() if p
-            ) if any(self.state["positions"].values()) else 0
-            self.state["total_balance"] = self.state["balance"] + total_pos_value
             self.state["positions"][symbol] = None
             if self.user_id:
                 tid = add_trade(self.user_id, "SELL", price, qty, "exit", round(pnl_pct, 2), symbol=symbol)
@@ -121,6 +131,7 @@ class BotRunner:
                     self.state["signals"][sym] = {"ma": ma_sig, "ml": ml_sig, "consensus": consensus}
                     qty = self.config.get("trade_quantity", TRADE_QUANTITY)
                     self._mock_trade_logic(sym, price, consensus, qty)
+                self._refresh_pnl_and_balance()
                 self.state["last_update"] = datetime.now().isoformat()
             time.sleep(2)
 
@@ -234,10 +245,7 @@ class BotRunner:
                                 self.state["last_trade_id"] = tid
 
                     with self._lock:
-                        total_pos_value = sum(
-                            p.get("entry", 0) * p.get("qty", 0) for p in self.state["positions"].values() if p
-                        )
-                        self.state["total_balance"] = self.state["balance"] + total_pos_value
+                        self._refresh_pnl_and_balance()
 
                 with self._lock:
                     self.state["last_update"] = datetime.now().isoformat()
