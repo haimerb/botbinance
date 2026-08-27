@@ -1,8 +1,16 @@
 import subprocess
 import sys
 import os
+import threading
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def _wait_and_exit(proc, name, stop_event):
+    proc.wait()
+    if not stop_event.is_set():
+        print(f"\n  [{name}] Proceso terminado inesperadamente.")
+        stop_event.set()
 
 
 def main():
@@ -29,16 +37,24 @@ def main():
     print("  Presiona Ctrl+C para detener ambos servicios.")
     print()
 
+    stop_event = threading.Event()
+
+    t1 = threading.Thread(target=_wait_and_exit, args=(backend, "BACKEND", stop_event), daemon=True)
+    t2 = threading.Thread(target=_wait_and_exit, args=(frontend, "FRONTEND", stop_event), daemon=True)
+    t1.start()
+    t2.start()
+
     try:
-        backend.wait()
-        frontend.wait()
+        stop_event.wait()
     except KeyboardInterrupt:
-        print("\n  Deteniendo servicios...")
-        backend.terminate()
-        frontend.terminate()
-        backend.wait()
-        frontend.wait()
-        print("  Servicios detenidos.")
+        pass
+
+    print("\n  Deteniendo servicios...")
+    backend.terminate()
+    frontend.terminate()
+    backend.wait()
+    frontend.wait()
+    print("  Servenicios detenidos.")
 
 
 if __name__ == "__main__":

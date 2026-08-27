@@ -295,7 +295,7 @@ export default function AccountSettings({ user, onBack }) {
               <div className="settings-form-grid">
                 <div className="field">
                   <label><LabelWithTooltip label="Intervalo" tooltip={TOOLTIPS.interval} /></label>
-                  <select name="interval" defaultValue={config.interval}>
+                  <select name="interval" value={config.interval}>
                     <option value="15m">15 min</option>
                     <option value="30m">30 min</option>
                     <option value="1h">1 hora</option>

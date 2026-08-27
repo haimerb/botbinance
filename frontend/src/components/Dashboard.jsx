@@ -62,14 +62,14 @@ function Dashboard({ user, onLogout, onAccount }) {
               notifTimeoutRef.current = setTimeout(() => setNotification(null), 5000)
             }
           }
-        } catch {}
+        } catch (e) { console.error('Error fetching recent trades:', e) }
         lastTradeIdRef.current = serverLastId
       }
 
       if (s?.symbols?.length && !activeSymbol) {
         setActiveSymbol(s.symbols[0])
       }
-    } catch {}
+    } catch (e) { console.error('Error fetching trades/stats:', e) }
   }, [tradeLimit, activeSymbol, state])
 
   useEffect(() => {
@@ -305,7 +305,7 @@ function Dashboard({ user, onLogout, onAccount }) {
             <span className="count">{trades.length} trades</span>
           </div>
         </div>
-        <TradeTable trades={trades} tradeLimit={tradeLimit} onLimitChange={setTradeLimit} />
+        <TradeTable trades={trades} />
       </div>
     </>
   )

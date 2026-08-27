@@ -12,12 +12,12 @@ def make_df(closes):
 
 
 def test_buy_signal():
-    prices = [10, 10, 10, 10, 10, 10, 11, 12, 13, 14,
-              15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+    prices = [10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+              10, 10, 10, 10, 9, 9, 9, 9, 9, 20]
     df = make_df(prices)
     strat = MACrossoverStrategy(fast_period=5, slow_period=10)
     signal = strat.generate_signal(df)
-    assert signal in ("BUY", "SELL", "HOLD")
+    assert signal == "BUY"
 
 
 def test_hold_on_insufficient_data():

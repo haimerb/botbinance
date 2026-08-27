@@ -1,8 +1,8 @@
+import copy
 import threading
 import time
 import random
 import math
-import os
 from datetime import datetime
 
 from src.config import DEFAULT_SYMBOLS, INTERVAL, TRADE_QUANTITY, BALANCE_ALLOCATION_PCT
@@ -43,23 +43,25 @@ class BotRunner:
         self._risk_managers = {}
 
     def set_user(self, user_id: int):
-        self.user_id = user_id
-        if user_id:
-            self.config = load_user_config(user_id)
-            self.state["symbols"] = list(self.config.get("symbols", DEFAULT_SYMBOLS))
-            alloc_pct = self.config.get("balance_allocation_pct", BALANCE_ALLOCATION_PCT)
-            total_balance = 10000.0
-            self.state["total_balance"] = total_balance
-            self.state["balance"] = total_balance * (alloc_pct / 100.0)
-            self.state["initial_balance"] = self.state["balance"]
-            symbols = self.state["symbols"]
-            for s in symbols:
-                if s not in self.state["current_prices"]:
-                    self.state["current_prices"][s] = 0.0
-                    self.state["positions"][s] = None
-                    self.state["signals"][s] = {"ma": "HOLD", "ml": "HOLD", "consensus": "HOLD"}
-                    self.mock_prices[s] = 65000.0 if "BTC" in s else 3500.0 if "ETH" in s else 150.0
-                    self.mock_phases[s] = random.random() * 6.28
+        with self._lock:
+            self.user_id = user_id
+            if user_id:
+                self.config = load_user_config(user_id)
+                self.state["symbols"] = list(self.config.get("symbols", DEFAULT_SYMBOLS))
+                alloc_pct = self.config.get("balance_allocation_pct", BALANCE_ALLOCATION_PCT)
+                total_balance = 10000.0
+                self.state["total_balance"] = total_balance
+                self.state["balance"] = total_balance * (alloc_pct / 100.0)
+                self.state["initial_balance"] = self.state["balance"]
+                symbols = self.state["symbols"]
+                for s in symbols:
+                    if s not in self.state["current_prices"]:
+                        self.state["current_prices"][s] = 0.0
+                        self.state["positions"][s] = None
+                        self.state["signals"][s] = {"ma": "HOLD", "ml": "HOLD", "consensus": "HOLD"}
+                        self.mock_prices[s] = 65000.0 if "BTC" in s else 3500.0 if "ETH" in s else 150.0
+                        self.mock_phases[s] = random.random() * 6.28
+                self._risk_managers.clear()
 
     def _mock_tick(self, symbol: str) -> float:
         phase = self.mock_phases.get(symbol, 0.0)
@@ -117,9 +119,11 @@ class BotRunner:
                 self.state["last_trade_id"] = tid
 
     def _run_mock(self):
-        self.state["status"] = "running"
+        with self._lock:
+            self.state["status"] = "running"
         while self.running:
-            symbols = self.state["symbols"]
+            with self._lock:
+                symbols = list(self.state["symbols"])
             if not symbols:
                 time.sleep(2)
                 continue
@@ -142,11 +146,11 @@ class BotRunner:
                 self.state["status"] = "error: API keys no configuradas"
                 return
 
-            os.environ["BINANCE_API_KEY"] = user.binance_api_key
-            os.environ["BINANCE_API_SECRET"] = user.binance_api_secret
+            api_key = user.binance_api_key
+            api_secret = user.binance_api_secret
 
             cfg = self.config
-            data_client = BinanceDataClient()
+            data_client = BinanceDataClient(api_key=api_key, api_secret=api_secret)
             ma_strategy = MACrossoverStrategy(
                 fast_period=cfg.get("ma_fast_period", 9),
                 slow_period=cfg.get("ma_slow_period", 21),
@@ -154,7 +158,7 @@ class BotRunner:
             ml_strategy = MLStrategy(
                 confidence_threshold=cfg.get("ml_confidence_threshold", 0.55),
             )
-            executor = TradeExecutor()
+            executor = TradeExecutor(api_key=api_key, api_secret=api_secret)
 
             with self._lock:
                 self.state["status"] = "running"
@@ -277,7 +281,7 @@ class BotRunner:
 
     def _get_state_copy(self):
         with self._lock:
-            return dict(self.state)
+            return copy.deepcopy(self.state)
 
     def get_state(self):
         s = self._get_state_copy()

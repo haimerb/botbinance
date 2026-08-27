@@ -20,8 +20,12 @@ async function request(path, options = {}) {
     },
   })
   if (!res.ok) {
-    const err = await res.json()
-    throw new Error(err.detail || `Error ${res.status}`)
+    let detail
+    try {
+      const err = await res.json()
+      detail = err.detail
+    } catch {}
+    throw new Error(detail || `Error ${res.status}`)
   }
   return res.json()
 }
@@ -112,6 +116,7 @@ function getWsUrl() {
 
 let ws = null
 let wsCallbacks = new Set()
+let reconnectTimer = null
 
 export function connectWs(onUpdate) {
   wsCallbacks.add(onUpdate)
@@ -119,7 +124,6 @@ export function connectWs(onUpdate) {
   if (ws) ws.close()
 
   ws = new WebSocket(getWsUrl())
-  let reconnectTimer = null
 
   ws.onmessage = (event) => {
     try {
@@ -130,8 +134,8 @@ export function connectWs(onUpdate) {
 
   ws.onclose = () => {
     ws = null
-    if (wsCallbacks.size > 0) {
-      reconnectTimer = setTimeout(() => connectWs(), 3000)
+    if (wsCallbacks.size > 0 && !reconnectTimer) {
+      reconnectTimer = setTimeout(() => { reconnectTimer = null; connectWs() }, 3000)
     }
   }
 
@@ -142,6 +146,10 @@ export function connectWs(onUpdate) {
 
 export function disconnectWs(onUpdate) {
   wsCallbacks.delete(onUpdate)
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
   if (wsCallbacks.size === 0 && ws) {
     ws.close()
     ws = null

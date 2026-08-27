@@ -1,6 +1,7 @@
 import os
+from contextlib import contextmanager
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, Float, String, Text, DateTime, ForeignKey, text
+from sqlalchemy import create_engine, Column, Integer, Float, String, Text, DateTime, ForeignKey, func, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATABASE_URL = os.getenv(
@@ -92,8 +93,6 @@ def init_db():
             except Exception:
                 session.rollback()
 
-
-from contextlib import contextmanager
 
 @contextmanager
 def get_session():
@@ -200,24 +199,29 @@ def get_trades(user_id: int, limit: int = 50) -> list:
 
 
 def get_trade_stats(user_id: int) -> dict:
-    session = get_session_simple()
-    rows = session.query(Trade).filter(Trade.user_id == user_id).all()
-    session.close()
-    exits = [r for r in rows if r.trade_type in ("exit", "stop_loss", "take_profit") and r.pnl_pct is not None]
-    wins = [r for r in exits if r.pnl_pct >= 0]
-    losses = [r for r in exits if r.pnl_pct < 0]
-    total_pnl = sum(r.pnl_pct for r in exits) if exits else 0.0
-    return {
-        "total_trades": len(rows),
-        "exits": len(exits),
-        "wins": len(wins),
-        "losses": len(losses),
-        "win_rate": round(len(wins) / len(exits) * 100, 1) if exits else 0.0,
-        "total_pnl_pct": round(total_pnl, 2),
-        "avg_pnl_pct": round(total_pnl / len(exits), 2) if exits else 0.0,
-        "best_trade": round(max(r.pnl_pct for r in exits), 2) if exits else 0.0,
-        "worst_trade": round(min(r.pnl_pct for r in exits), 2) if exits else 0.0,
-    }
+    with get_session() as session:
+        total = session.query(func.count(Trade.id)).filter(Trade.user_id == user_id).scalar() or 0
+
+        exits_q = session.query(Trade).filter(
+            Trade.user_id == user_id,
+            Trade.trade_type.in_(["exit", "stop_loss", "take_profit"]),
+            Trade.pnl_pct.isnot(None),
+        )
+        exits = exits_q.all()
+        wins = [r for r in exits if r.pnl_pct >= 0]
+        losses = [r for r in exits if r.pnl_pct < 0]
+        total_pnl = sum(r.pnl_pct for r in exits) if exits else 0.0
+        return {
+            "total_trades": total,
+            "exits": len(exits),
+            "wins": len(wins),
+            "losses": len(losses),
+            "win_rate": round(len(wins) / len(exits) * 100, 1) if exits else 0.0,
+            "total_pnl_pct": round(total_pnl, 2),
+            "avg_pnl_pct": round(total_pnl / len(exits), 2) if exits else 0.0,
+            "best_trade": round(max(r.pnl_pct for r in exits), 2) if exits else 0.0,
+            "worst_trade": round(min(r.pnl_pct for r in exits), 2) if exits else 0.0,
+        }
 
 
 def get_recent_trades(user_id: int, since_id: int = 0) -> list:

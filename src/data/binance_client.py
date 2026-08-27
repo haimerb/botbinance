@@ -5,8 +5,10 @@ from src.config import BINANCE_API_KEY, BINANCE_API_SECRET, USE_TESTNET
 
 
 class BinanceDataClient:
-    def __init__(self):
-        self.client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
+    def __init__(self, api_key: str = None, api_secret: str = None):
+        key = api_key if api_key is not None else BINANCE_API_KEY
+        secret = api_secret if api_secret is not None else BINANCE_API_SECRET
+        self.client = Client(key, secret)
         if USE_TESTNET:
             self.client.API_URL = "https://testnet.binance.vision/api"
 

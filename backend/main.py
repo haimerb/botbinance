@@ -189,13 +189,9 @@ def get_recent_trades_api(
     return {"trades": get_recent_trades(current_user["sub"], since_id), "since_id": since_id}
 
 
-connected_ws = set()
-
-
 @app.websocket("/api/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
-    connected_ws.add(ws)
     try:
         while True:
             state = bot.get_state()
@@ -205,14 +201,13 @@ async def websocket_endpoint(ws: WebSocket):
         pass
     except Exception:
         pass
-    finally:
-        connected_ws.discard(ws)
 
 
 @app.get("/api/config/suggest")
 def suggest_config(current_user: dict = Depends(get_current_user)):
     bot.set_user(current_user["sub"])
-    prices = bot.state.get("current_prices", {})
+    state = bot.get_state()
+    prices = state.get("current_prices", {})
     cfg = load_user_config(current_user["sub"])
     suggestions = {}
     first_price = None
@@ -232,7 +227,7 @@ def suggest_config(current_user: dict = Depends(get_current_user)):
             suggestions["trade_quantity"] = 1.0
         suggestions["ma_fast_period"] = 9
         suggestions["ma_slow_period"] = 21
-        vol = bot.state.get("signals", {}).get("volatility", "LOW")
+        vol = state.get("signals", {}).get("volatility", "LOW")
         if vol == "HIGH":
             suggestions["stop_loss_pct"] = round(max(atr_ratio * 2, 0.02), 3)
             suggestions["take_profit_pct"] = round(max(atr_ratio * 4, 0.03), 3)
