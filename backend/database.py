@@ -4,6 +4,8 @@ from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, Float, String, Text, DateTime, ForeignKey, func, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
+from backend.crypto import encrypt_value, decrypt_value
+
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://bot:bot123@localhost:5432/binance_bot"
@@ -22,6 +24,8 @@ class User(Base):
     password_hash = Column(Text, nullable=False)
     binance_api_key = Column(Text, default="")
     binance_api_secret = Column(Text, default="")
+    mfa_secret = Column(Text, default="")
+    mfa_enabled = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -43,6 +47,20 @@ class UserConfig(Base):
     balance_allocation_pct = Column(Float, default=100.0)
     ai_stop_loss_enabled = Column(Integer, default=0)
     ai_optimize_enabled = Column(Integer, default=0)
+    trailing_stop_pct = Column(Float, default=0.01)
+    trailing_activation_pct = Column(Float, default=0.015)
+    time_exit_hours = Column(Integer, default=24)
+    partial_tp1_pct = Column(Float, default=0.015)
+    partial_tp1_qty = Column(Float, default=0.3)
+    partial_tp2_pct = Column(Float, default=0.03)
+    partial_tp2_qty = Column(Float, default=0.3)
+    partial_tp3_pct = Column(Float, default=0.05)
+    partial_tp3_qty = Column(Float, default=0.4)
+    enable_trailing = Column(Integer, default=1)
+    enable_time_exit = Column(Integer, default=1)
+    enable_partial_tp = Column(Integer, default=1)
+    max_daily_loss_pct = Column(Float, default=5.0)
+    max_total_loss_pct = Column(Float, default=10.0)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
@@ -79,6 +97,18 @@ class ErrorLog(Base):
     timestamp = Column(DateTime, default=datetime.now)
 
 
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    event_type = Column(String(50), nullable=False)
+    event_data = Column(Text, default="")
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(Text, nullable=True)
+    timestamp = Column(DateTime, default=datetime.now, index=True)
+
+
 def init_db():
     Base.metadata.create_all(engine)
     with get_session() as session:
@@ -87,6 +117,22 @@ def init_db():
             "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS balance_allocation_pct FLOAT DEFAULT 100.0",
             "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS ai_stop_loss_enabled INTEGER DEFAULT 0",
             "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS ai_optimize_enabled INTEGER DEFAULT 0",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS trailing_stop_pct FLOAT DEFAULT 0.01",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS trailing_activation_pct FLOAT DEFAULT 0.015",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS time_exit_hours INTEGER DEFAULT 24",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS partial_tp1_pct FLOAT DEFAULT 0.015",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS partial_tp1_qty FLOAT DEFAULT 0.3",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS partial_tp2_pct FLOAT DEFAULT 0.03",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS partial_tp2_qty FLOAT DEFAULT 0.3",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS partial_tp3_pct FLOAT DEFAULT 0.05",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS partial_tp3_qty FLOAT DEFAULT 0.4",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS enable_trailing INTEGER DEFAULT 1",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS enable_time_exit INTEGER DEFAULT 1",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS enable_partial_tp INTEGER DEFAULT 1",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS max_daily_loss_pct FLOAT DEFAULT 5.0",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS max_total_loss_pct FLOAT DEFAULT 10.0",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret TEXT DEFAULT ''",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled INTEGER DEFAULT 0",
         ]:
             try:
                 session.execute(text(stmt))
@@ -135,11 +181,19 @@ def get_user_by_id(user_id: int):
     return user
 
 
+def get_user_by_id_with_keys(user_id: int):
+    user = get_user_by_id(user_id)
+    if user:
+        user.binance_api_key = decrypt_value(user.binance_api_key)
+        user.binance_api_secret = decrypt_value(user.binance_api_secret)
+    return user
+
+
 def update_binance_keys(user_id: int, api_key: str, api_secret: str):
     with get_session() as session:
         session.query(User).filter(User.id == user_id).update({
-            "binance_api_key": api_key,
-            "binance_api_secret": api_secret,
+            "binance_api_key": encrypt_value(api_key),
+            "binance_api_secret": encrypt_value(api_secret),
             "updated_at": datetime.now(),
         })
 
@@ -247,3 +301,21 @@ def log_error(user_id: int | None, message: str):
     with get_session() as session:
         err = ErrorLog(user_id=user_id, message=message)
         session.add(err)
+
+
+def log_audit(
+    user_id: int | None,
+    event_type: str,
+    event_data: str = "",
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+):
+    with get_session() as session:
+        audit = AuditLog(
+            user_id=user_id,
+            event_type=event_type,
+            event_data=event_data,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        session.add(audit)

@@ -117,13 +117,29 @@ function getWsUrl() {
 let ws = null
 let wsCallbacks = new Set()
 let reconnectTimer = null
+let reconnectAttempts = 0
+const MAX_RECONNECT_ATTEMPTS = 10
+const BASE_RECONNECT_DELAY = 1000
+const MAX_RECONNECT_DELAY = 30000
+
+function getReconnectDelay(attempt) {
+  const delay = Math.min(BASE_RECONNECT_DELAY * Math.pow(2, attempt), MAX_RECONNECT_DELAY)
+  return delay + Math.random() * 1000
+}
 
 export function connectWs(onUpdate) {
   wsCallbacks.add(onUpdate)
   if (ws && ws.readyState === WebSocket.OPEN) return
   if (ws) ws.close()
 
-  ws = new WebSocket(getWsUrl())
+  const token = getToken()
+  if (!token) {
+    console.warn('No token available for WebSocket connection')
+    return
+  }
+  
+  const wsUrl = `${getWsUrl()}?token=${encodeURIComponent(token)}`
+  ws = new WebSocket(wsUrl)
 
   ws.onmessage = (event) => {
     try {
@@ -132,15 +148,34 @@ export function connectWs(onUpdate) {
     } catch {}
   }
 
-  ws.onclose = () => {
+  ws.onclose = (event) => {
     ws = null
+    reconnectAttempts++
+    
     if (wsCallbacks.size > 0 && !reconnectTimer) {
-      reconnectTimer = setTimeout(() => { reconnectTimer = null; connectWs() }, 3000)
+      if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        console.error('Max WebSocket reconnect attempts reached')
+        wsCallbacks.forEach(cb => cb({ error: 'Max reconnection attempts reached' }))
+        return
+      }
+      
+      const delay = getReconnectDelay(reconnectAttempts)
+      console.log(`WebSocket reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`)
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        connectWs()
+      }, delay)
     }
   }
 
-  ws.onerror = () => {
+  ws.onerror = (error) => {
+    console.error('WebSocket error:', error)
     ws.close()
+  }
+  
+  ws.onopen = () => {
+    reconnectAttempts = 0
+    console.log('WebSocket connected')
   }
 }
 

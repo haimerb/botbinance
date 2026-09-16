@@ -441,6 +441,72 @@ tr:last-child td { border-bottom: none; }
 .empty p { font-size: 0.85rem; margin-bottom: 3px; }
 .empty span { font-size: 0.75rem; color: var(--text-dim); }
 
+/* ===== CHART SECTION ===== */
+.chart-section {
+  border-radius: var(--radius); overflow: hidden; margin-bottom: 12px;
+}
+.chart-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+}
+.chart-header h2 {
+  font-family: var(--font-heading);
+  font-size: 0.75rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  display: flex; align-items: center; gap: 8px;
+  color: var(--text-secondary);
+}
+.chart-timeframe {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.detail-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 4px;
+  font-size: 0.6rem; font-weight: 600;
+  font-family: var(--font-mono); text-transform: uppercase;
+}
+.detail-badge.buy { background: var(--green-glow); color: var(--green); }
+.detail-badge.sell { background: var(--red-glow); color: var(--red); }
+.detail-badge.info { background: rgba(96, 165, 250, 0.12); color: var(--blue); }
+.loading-detail { color: var(--text-dim); font-size: 0.7rem; }
+
+/* ===== PRICE CHART ===== */
+.price-chart-wrapper {
+  padding: 16px; overflow-x: auto;
+}
+.price-chart { display: block; }
+.chart-empty { display: flex; align-items: center; justify-content: center; height: 100%; }
+
+.chart-legend {
+  display: flex; gap: 16px; padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap; align-items: center;
+}
+.legend-item {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 0.7rem; color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+.legend-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.legend-item strong { color: var(--text-primary); }
+.legend-item.pnl-badge {
+  font-weight: 600; font-size: 0.75rem;
+  padding: 2px 8px; border-radius: 4px;
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.chart-empty {
+  display: flex; align-items: center; justify-content: center;
+  height: 200px; color: var(--text-dim);
+}
+
+.entry-marker text {
+  paint-order: stroke fill;
+  stroke: #060b14; stroke-width: 3px;
+}
+
 /* ===== NOTIFICATIONS ===== */
 .notif {
   display: flex; align-items: center; gap: 10px;

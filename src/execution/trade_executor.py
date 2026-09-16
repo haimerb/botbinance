@@ -1,6 +1,6 @@
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
-from src.config import BINANCE_API_KEY, BINANCE_API_SECRET, USE_TESTNET
+from src.config import BINANCE_API_KEY, BINANCE_API_SECRET, USE_TESTNET, BINANCE_API_URL
 
 
 class TradeExecutor:
@@ -8,8 +8,7 @@ class TradeExecutor:
         key = api_key if api_key is not None else BINANCE_API_KEY
         secret = api_secret if api_secret is not None else BINANCE_API_SECRET
         self.client = Client(key, secret)
-        if USE_TESTNET:
-            self.client.API_URL = "https://testnet.binance.vision/api"
+        self.client.API_URL = BINANCE_API_URL
         self.last_order = None
 
     def execute_order(self, side: str, quantity: float, symbol: str = "BTCUSDT", order_type="MARKET"):

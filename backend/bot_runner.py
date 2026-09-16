@@ -4,14 +4,16 @@ import time
 import random
 import math
 from datetime import datetime
+from typing import Optional
 
 from src.config import DEFAULT_SYMBOLS, INTERVAL, TRADE_QUANTITY, BALANCE_ALLOCATION_PCT
 from src.data.binance_client import BinanceDataClient
 from src.strategy.ma_crossover import MACrossoverStrategy
 from src.strategy.ml_strategy import MLStrategy
+from src.strategy.enhanced_strategy import EnhancedStrategy, MACrossoverEnhanced, SignalResult
 from src.execution.trade_executor import TradeExecutor
-from src.risk.risk_manager import RiskManager
-from backend.database import add_trade, get_user_by_id
+from src.risk.risk_manager import RiskManager, ExitReason
+from backend.database import add_trade, get_user_by_id, get_user_by_id_with_keys
 from backend.user_config import load_user_config
 
 
@@ -30,6 +32,7 @@ class BotRunner:
             "current_prices": {},
             "positions": {},
             "signals": {},
+            "strategy_details": {},
             "balance": 10000.0,
             "pnl": 0.0,
             "total_pnl": 0.0,
@@ -37,10 +40,18 @@ class BotRunner:
             "model_accuracy": 38.78,
             "last_update": None,
             "last_trade_id": 0,
+            "daily_pnl": 0.0,
+            "unrealized_pnl": 0.0,
+            "circuit_breaker_triggered": False,
+            "max_daily_loss_pct": 5.0,
+            "max_total_loss_pct": 10.0,
         }
         self.mock_prices = {}
         self.mock_phases = {}
         self._risk_managers = {}
+        self._enhanced_strategies = {}
+        self._ma_strategies = {}
+        self._ml_strategies = {}
 
     def set_user(self, user_id: int):
         with self._lock:
@@ -53,15 +64,21 @@ class BotRunner:
                 self.state["total_balance"] = total_balance
                 self.state["balance"] = total_balance * (alloc_pct / 100.0)
                 self.state["initial_balance"] = self.state["balance"]
+                self.state["max_daily_loss_pct"] = self.config.get("max_daily_loss_pct", 5.0)
+                self.state["max_total_loss_pct"] = self.config.get("max_total_loss_pct", 10.0)
                 symbols = self.state["symbols"]
                 for s in symbols:
                     if s not in self.state["current_prices"]:
                         self.state["current_prices"][s] = 0.0
                         self.state["positions"][s] = None
-                        self.state["signals"][s] = {"ma": "HOLD", "ml": "HOLD", "consensus": "HOLD"}
+                        self.state["signals"][s] = {"ma": "HOLD", "ml": "HOLD", "enhanced": "HOLD", "consensus": "HOLD"}
+                        self.state["strategy_details"][s] = {}
                         self.mock_prices[s] = 65000.0 if "BTC" in s else 3500.0 if "ETH" in s else 150.0
                         self.mock_phases[s] = random.random() * 6.28
                 self._risk_managers.clear()
+                self._enhanced_strategies.clear()
+                self._ma_strategies.clear()
+                self._ml_strategies.clear()
 
     def _mock_tick(self, symbol: str) -> float:
         phase = self.mock_phases.get(symbol, 0.0)
@@ -78,8 +95,9 @@ class BotRunner:
     def _mock_signal(self):
         ma = random.choices(["BUY", "SELL", "HOLD"], weights=[0.15, 0.1, 0.75])[0]
         ml = random.choices(["BUY", "SELL", "HOLD"], weights=[0.2, 0.15, 0.65])[0]
+        enhanced = random.choices(["BUY", "SELL", "HOLD"], weights=[0.18, 0.12, 0.70])[0]
         consensus = ma if ma == ml and ma != "HOLD" else "HOLD"
-        return ma, ml, consensus
+        return ma, ml, enhanced, consensus
 
     def _refresh_pnl_and_balance(self):
         unrealized = 0.0
@@ -87,15 +105,18 @@ class BotRunner:
         for sym, pos in self.state["positions"].items():
             if not pos:
                 continue
-            price = self.state["current_prices"].get(sym, pos["entry"])
+            price = self.state["current_prices"].get(sym, pos.get("entry", 0))
             qty = pos.get("qty", 0)
-            unrealized += (price - pos["entry"]) * qty
+            unrealized += (price - pos.get("entry", 0)) * qty
             total_pos_value += price * qty
+        self.state["unrealized_pnl"] = unrealized
         self.state["total_pnl"] = self.state["pnl"] + unrealized
         self.state["total_balance"] = self.state["balance"] + total_pos_value
 
     def _mock_trade_logic(self, symbol: str, price: float, signal: str, qty: float):
         pos = self.state["positions"].get(symbol)
+        rm = self._risk_managers.get(symbol)
+
         if signal == "BUY" and not pos:
             cost = price * qty
             if self.state["balance"] < cost:
@@ -105,22 +126,52 @@ class BotRunner:
                 "side": "BUY", "entry": price, "qty": qty,
                 "time": datetime.now().isoformat(),
             }
+            if rm:
+                rm.open_position(price, qty)
             if self.user_id:
                 tid = add_trade(self.user_id, "BUY", price, qty, "entry", symbol=symbol)
                 self.state["last_trade_id"] = tid
+
         elif signal == "SELL" and pos:
-            entry = pos["entry"]
+            entry = pos.get("entry", price)
             pnl_pct = (price - entry) / entry * 100
             self.state["balance"] += price * qty
             self.state["pnl"] += (price - entry) * qty
+            self.state["daily_pnl"] += (price - entry) * qty
             self.state["positions"][symbol] = None
+            if rm:
+                rm.close_position(ExitReason.SIGNAL_REVERSAL)
             if self.user_id:
                 tid = add_trade(self.user_id, "SELL", price, qty, "exit", round(pnl_pct, 2), symbol=symbol)
                 self.state["last_trade_id"] = tid
 
+    def _check_circuit_breakers(self) -> bool:
+        if self.state["circuit_breaker_triggered"]:
+            return True
+        
+        initial_balance = self.state.get("initial_balance", 10000.0)
+        max_daily_loss = self.state.get("max_daily_loss_pct", 5.0) / 100.0
+        max_total_loss = self.state.get("max_total_loss_pct", 10.0) / 100.0
+        
+        daily_loss_pct = abs(self.state["daily_pnl"]) / initial_balance if self.state["daily_pnl"] < 0 else 0
+        total_loss_pct = abs(self.state["pnl"]) / initial_balance if self.state["pnl"] < 0 else 0
+        
+        if daily_loss_pct >= max_daily_loss:
+            self.state["circuit_breaker_triggered"] = True
+            self.state["status"] = f"circuit_breaker: max daily loss ({max_daily_loss*100:.1f}%) exceeded"
+            return True
+        
+        if total_loss_pct >= max_total_loss:
+            self.state["circuit_breaker_triggered"] = True
+            self.state["status"] = f"circuit_breaker: max total loss ({max_total_loss*100:.1f}%) exceeded"
+            return True
+        
+        return False
+
     def _run_mock(self):
         with self._lock:
             self.state["status"] = "running"
+            self.state["circuit_breaker_triggered"] = False
         while self.running:
             with self._lock:
                 symbols = list(self.state["symbols"])
@@ -128,20 +179,48 @@ class BotRunner:
                 time.sleep(2)
                 continue
             with self._lock:
+                if self._check_circuit_breakers():
+                    self.running = False
+                    break
                 for sym in symbols:
                     price = self._mock_tick(sym)
-                    ma_sig, ml_sig, consensus = self._mock_signal()
+                    ma_sig, ml_sig, enh_sig, consensus = self._mock_signal()
                     self.state["current_prices"][sym] = price
-                    self.state["signals"][sym] = {"ma": ma_sig, "ml": ml_sig, "consensus": consensus}
+                    self.state["signals"][sym] = {
+                        "ma": ma_sig, "ml": ml_sig, "enhanced": enh_sig, "consensus": consensus
+                    }
                     qty = self.config.get("trade_quantity", TRADE_QUANTITY)
                     self._mock_trade_logic(sym, price, consensus, qty)
+
+                    rm = self._risk_managers.get(sym)
+                    if rm and rm.has_position():
+                        exits = rm.check_all_exits(price)
+                        for reason, msg in exits:
+                            if reason in (ExitReason.STOP_LOSS, ExitReason.TRAILING_STOP,
+                                          ExitReason.TAKE_PROFIT, ExitReason.TIME_EXIT):
+                                pos = self.state["positions"].get(sym)
+                                if pos:
+                                    exit_qty = pos.get("qty", qty)
+                                    self.state["balance"] += price * exit_qty
+                                    pnl_pct = (price - pos.get("entry", price)) / pos.get("entry", price) * 100
+                                    self.state["pnl"] += (price - pos.get("entry", price)) * exit_qty
+                                    self.state["daily_pnl"] += (price - pos.get("entry", price)) * exit_qty
+                                    self.state["positions"][sym] = None
+                                    rm.close_position(reason)
+                                    if self.user_id:
+                                        tid = add_trade(self.user_id, "SELL", price, exit_qty, reason.value, round(pnl_pct, 2), symbol=sym)
+                                        self.state["last_trade_id"] = tid
+
+                            elif reason == ExitReason.PARTIAL_TP:
+                                pass
+
                 self._refresh_pnl_and_balance()
                 self.state["last_update"] = datetime.now().isoformat()
             time.sleep(2)
 
     def _run_live(self):
         try:
-            user = get_user_by_id(self.user_id) if self.user_id else None
+            user = get_user_by_id_with_keys(self.user_id) if self.user_id else None
             if not user or not user.binance_api_key or not user.binance_api_secret:
                 self.state["status"] = "error: API keys no configuradas"
                 return
@@ -151,31 +230,61 @@ class BotRunner:
 
             cfg = self.config
             data_client = BinanceDataClient(api_key=api_key, api_secret=api_secret)
-            ma_strategy = MACrossoverStrategy(
-                fast_period=cfg.get("ma_fast_period", 9),
-                slow_period=cfg.get("ma_slow_period", 21),
-            )
-            ml_strategy = MLStrategy(
-                confidence_threshold=cfg.get("ml_confidence_threshold", 0.55),
-            )
+
+            for sym in self.state["symbols"]:
+                if sym not in self._ma_strategies:
+                    self._ma_strategies[sym] = MACrossoverEnhanced(
+                        fast_period=cfg.get("ma_fast_period", 9),
+                        slow_period=cfg.get("ma_slow_period", 21),
+                    )
+                if sym not in self._ml_strategies:
+                    self._ml_strategies[sym] = MLStrategy(
+                        confidence_threshold=cfg.get("ml_confidence_threshold", 0.55),
+                    )
+                if sym not in self._enhanced_strategies:
+                    self._enhanced_strategies[sym] = EnhancedStrategy(
+                        theil_window=cfg.get("theil_window", 20),
+                        ema_fast=cfg.get("ema_fast", 9),
+                        ema_slow=cfg.get("ema_slow", 21),
+                        rsi_period=cfg.get("rsi_period", 14),
+                        atr_period=cfg.get("atr_period", 14),
+                    )
+
             executor = TradeExecutor(api_key=api_key, api_secret=api_secret)
 
             with self._lock:
                 self.state["status"] = "running"
+                self.state["circuit_breaker_triggered"] = False
+
             while self.running:
                 symbols = list(self.state["symbols"])
                 if not symbols:
                     time.sleep(10)
                     continue
 
+                with self._lock:
+                    if self._check_circuit_breakers():
+                        self.running = False
+                        break
+
                 for sym in symbols:
                     df = data_client.fetch_klines(sym, cfg.get("interval", "1h"))
                     if df.empty:
                         continue
 
-                    ma_signal = ma_strategy.generate_signal(df)
-                    ml_signal = ml_strategy.generate_signal(df)
-                    consensus = ma_signal if ma_signal == ml_signal and ma_signal != "HOLD" else "HOLD"
+                    ma_signal = self._ma_strategies[sym].generate_signal(df)
+                    ml_signal = self._ml_strategies[sym].generate_signal(df)
+                    enhanced_result = self._enhanced_strategies[sym].generate_signal(df)
+
+                    consensus_signals = [ma_signal, ml_signal, enhanced_result.signal]
+                    buy_votes = consensus_signals.count("BUY")
+                    sell_votes = consensus_signals.count("SELL")
+                    if buy_votes >= 2:
+                        consensus = "BUY"
+                    elif sell_votes >= 2:
+                        consensus = "SELL"
+                    else:
+                        consensus = "HOLD"
 
                     price = executor.get_symbol_price(sym)
                     if price == 0.0:
@@ -183,7 +292,13 @@ class BotRunner:
 
                     with self._lock:
                         self.state["current_prices"][sym] = price
-                        self.state["signals"][sym] = {"ma": ma_signal, "ml": ml_signal, "consensus": consensus}
+                        self.state["signals"][sym] = {
+                            "ma": ma_signal,
+                            "ml": ml_signal,
+                            "enhanced": enhanced_result.signal,
+                            "consensus": consensus,
+                        }
+                        self.state["strategy_details"][sym] = enhanced_result.details
 
                     rm = self._risk_managers.get(sym)
                     if not rm:
@@ -193,10 +308,17 @@ class BotRunner:
                             atr = df["atr_ratio"].iloc[-1] if "atr_ratio" in df.columns else 0.02
                             base_sl = min(max(atr * 1.5, 0.01), 0.05)
                             base_tp = min(max(atr * 3, 0.02), 0.08)
+
                         rm = RiskManager(
                             stop_loss_pct=base_sl,
                             take_profit_pct=base_tp,
                             max_position_size=cfg.get("max_position_size", 0.01),
+                            trailing_stop_pct=cfg.get("trailing_stop_pct", 0.01),
+                            trailing_activation_pct=cfg.get("trailing_activation_pct", 0.015),
+                            time_exit_hours=cfg.get("time_exit_hours", 24),
+                            enable_trailing=cfg.get("enable_trailing", True),
+                            enable_time_exit=cfg.get("enable_time_exit", True),
+                            enable_partial_tp=cfg.get("enable_partial_tp", True),
                         )
                         self._risk_managers[sym] = rm
                     elif cfg.get("ai_stop_loss_enabled", False):
@@ -208,24 +330,29 @@ class BotRunner:
                     qty = cfg.get("trade_quantity", TRADE_QUANTITY)
 
                     if rm.has_position():
-                        if rm.check_stop_loss(price):
-                            executor.execute_order("SELL", qty, sym)
-                            rm.close_position()
-                            with self._lock:
-                                self.state["positions"][sym] = None
-                            if self.user_id:
-                                tid = add_trade(self.user_id, "SELL", price, qty, "stop_loss", symbol=sym)
-                                with self._lock:
-                                    self.state["last_trade_id"] = tid
-                        elif rm.check_take_profit(price):
-                            executor.execute_order("SELL", qty, sym)
-                            rm.close_position()
-                            with self._lock:
-                                self.state["positions"][sym] = None
-                            if self.user_id:
-                                tid = add_trade(self.user_id, "SELL", price, qty, "take_profit", symbol=sym)
-                                with self._lock:
-                                    self.state["last_trade_id"] = tid
+                        exits = rm.check_all_exits(price)
+                        pos = self.state["positions"].get(sym)
+
+                        for reason, msg in exits:
+                            if reason in (ExitReason.STOP_LOSS, ExitReason.TRAILING_STOP,
+                                          ExitReason.TAKE_PROFIT, ExitReason.TIME_EXIT):
+                                if pos:
+                                    exit_qty = pos.get("qty", qty)
+                                    executor.execute_order("SELL", exit_qty, sym)
+                                    pnl_pct = (price - pos.get("entry", price)) / pos.get("entry", price) * 100
+                                    self.state["balance"] += price * exit_qty
+                                    self.state["pnl"] += (price - pos.get("entry", price)) * exit_qty
+                                    self.state["daily_pnl"] += (price - pos.get("entry", price)) * exit_qty
+                                    with self._lock:
+                                        self.state["positions"][sym] = None
+                                    rm.close_position(reason)
+                                    if self.user_id:
+                                        tid = add_trade(self.user_id, "SELL", price, exit_qty, reason.value, round(pnl_pct, 2), symbol=sym)
+                                        self.state["last_trade_id"] = tid
+
+                            elif reason == ExitReason.PARTIAL_TP:
+                                pass
+
                     elif consensus == "BUY":
                         if rm.open_position(price, qty):
                             executor.execute_order("BUY", qty, sym)
@@ -236,16 +363,21 @@ class BotRunner:
                                 }
                             if self.user_id:
                                 tid = add_trade(self.user_id, "BUY", price, qty, "entry", symbol=sym)
-                                with self._lock:
-                                    self.state["last_trade_id"] = tid
+                                self.state["last_trade_id"] = tid
+
                     elif consensus == "SELL" and rm.has_position():
-                        executor.execute_order("SELL", qty, sym)
-                        rm.close_position()
-                        with self._lock:
-                            self.state["positions"][sym] = None
-                        if self.user_id:
-                            tid = add_trade(self.user_id, "SELL", price, qty, "exit", symbol=sym)
+                        pos = self.state["positions"].get(sym)
+                        if pos:
+                            executor.execute_order("SELL", qty, sym)
+                            pnl_pct = (price - pos.get("entry", price)) / pos.get("entry", price) * 100
+                            self.state["balance"] += price * qty
+                            self.state["pnl"] += (price - pos.get("entry", price)) * qty
+                            self.state["daily_pnl"] += (price - pos.get("entry", price)) * qty
                             with self._lock:
+                                self.state["positions"][sym] = None
+                            rm.close_position(ExitReason.SIGNAL_REVERSAL)
+                            if self.user_id:
+                                tid = add_trade(self.user_id, "SELL", price, qty, "exit", round(pnl_pct, 2), symbol=sym)
                                 self.state["last_trade_id"] = tid
 
                     with self._lock:
@@ -291,5 +423,6 @@ class BotRunner:
         sig = s["signals"].get(first_sym, {})
         s["ma_signal"] = sig.get("ma", "HOLD")
         s["ml_signal"] = sig.get("ml", "HOLD")
+        s["enhanced_signal"] = sig.get("enhanced", "HOLD")
         s["last_signal"] = sig.get("consensus", "HOLD")
         return s

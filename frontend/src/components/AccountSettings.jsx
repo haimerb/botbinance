@@ -23,6 +23,13 @@ const TOOLTIPS = {
   ma_slow_period: 'Período de la media móvil lenta. Valores mayores filtran más ruido del mercado.',
   ml_confidence: 'Confianza mínima que debe tener el modelo ML para generar una señal. Mayor = menos señales pero más selectivas.',
   balance_allocation: 'Porcentaje del balance total que el bot puede usar para operar. El resto se mantiene como reserva.',
+  trailing_stop_pct: 'Distancia porcentual del trailing stop. El stop se mueve detrás del precio cuando la ganancia supera la activación.',
+  trailing_activation_pct: 'Ganancia mínima para activar el trailing stop. El trailing solo empieza tras superar esta ganancia.',
+  time_exit_hours: 'Horas máximas que una posición puede permanecer abierta antes de cerrarse automáticamente (0 = desactivado).',
+  partial_tp: 'Niveles de take profit parcial. Cada nivel: [porcentaje objetivo, % de cantidad a cerrar]. Ej: 1.5 = 1.5%, 30 = cierra 30% de la posición.',
+  enable_trailing: 'Activa el trailing stop dinámico. El stop se mueve a favor de la posición cuando hay ganancias.',
+  enable_time_exit: 'Activa el cierre automático por tiempo. Cierra la posición si no se cumple SL/TP en las horas configuradas.',
+  enable_partial_tp: 'Activa los take profits parciales. Cierra partes de la posición en varios niveles de ganancia.',
 }
 
 export default function AccountSettings({ user, onBack }) {
@@ -79,6 +86,18 @@ export default function AccountSettings({ user, onBack }) {
         ml_confidence_threshold: parseFloat(form.ml_confidence.value) / 100,
         balance_allocation_pct: parseFloat(form.balance_allocation.value),
         ai_stop_loss_enabled: form.ai_stop_loss ? form.ai_stop_loss.checked : false,
+        trailing_stop_pct: parseFloat(form.trailing_stop_pct.value) / 100,
+        trailing_activation_pct: parseFloat(form.trailing_activation_pct.value) / 100,
+        time_exit_hours: parseInt(form.time_exit_hours.value),
+        partial_tp1_pct: parseFloat(form.partial_tp1_pct.value) / 100,
+        partial_tp1_qty: parseFloat(form.partial_tp1_qty.value) / 100,
+        partial_tp2_pct: parseFloat(form.partial_tp2_pct.value) / 100,
+        partial_tp2_qty: parseFloat(form.partial_tp2_qty.value) / 100,
+        partial_tp3_pct: parseFloat(form.partial_tp3_pct.value) / 100,
+        partial_tp3_qty: parseFloat(form.partial_tp3_qty.value) / 100,
+        enable_trailing: form.enable_trailing ? form.enable_trailing.checked : true,
+        enable_time_exit: form.enable_time_exit ? form.enable_time_exit.checked : true,
+        enable_partial_tp: form.enable_partial_tp ? form.enable_partial_tp.checked : true,
       }
       const updated = await api.updateUserConfig(data)
       setConfig(updated)
@@ -342,47 +361,108 @@ export default function AccountSettings({ user, onBack }) {
                   <label><LabelWithTooltip label="Balance Asignado (%)" tooltip={TOOLTIPS.balance_allocation} /></label>
                   <input type="number" name="balance_allocation" step="5" min="1" max="100"
                     defaultValue={config.balance_allocation_pct} required />
+</div>
+              <div className="field">
+                <label>
+                  <LabelWithTooltip label="Stop Loss Inteligente (IA)" tooltip="Usa la volatilidad del mercado para ajustar dinámicamente el stop-loss y take-profit. Recomendado para mercados volátiles." />
+                </label>
+                <label className="toggle-wrap">
+                  <input type="checkbox" name="ai_stop_loss" defaultChecked={config.ai_stop_loss_enabled} />
+                  <span className="toggle-track"><span className="toggle-thumb" /></span>
+                </label>
+              </div>
+            </div>
+            <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '16px 0' }} />
+            <div className="settings-section glass" style={{ marginTop: '8px', padding: '16px' }}>
+              <h4 style={{ fontSize: '0.7rem', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-secondary)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" opacity="0.4">
+                  <path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                </svg>
+                Gestión de Riesgo Avanzada
+              </h4>
+              <div className="settings-form-grid">
+                <div className="field">
+                  <label><LabelWithTooltip label="Trailing Stop (%)" tooltip={TOOLTIPS.trailing_stop_pct} /></label>
+                  <input type="number" name="trailing_stop_pct" step="0.1" min="0.1" max="10"
+                    defaultValue={(config.trailing_stop_pct * 100).toFixed(1)} />
+                </div>
+                <div className="field">
+                  <label><LabelWithTooltip label="Activación Trailing (%)" tooltip={TOOLTIPS.trailing_activation_pct} /></label>
+                  <input type="number" name="trailing_activation_pct" step="0.1" min="0.1" max="20"
+                    defaultValue={(config.trailing_activation_pct * 100).toFixed(1)} />
+                </div>
+                <div className="field">
+                  <label><LabelWithTooltip label="Time Exit (horas)" tooltip={TOOLTIPS.time_exit_hours} /></label>
+                  <input type="number" name="time_exit_hours" step="1" min="0" max="168"
+                    defaultValue={config.time_exit_hours} />
+                </div>
+                <div className="field">
+                  <label><LabelWithTooltip label="Partial TP Nivel 1 (% objetivo)" tooltip={TOOLTIPS.partial_tp} /></label>
+                  <input type="number" name="partial_tp1_pct" step="0.1" min="0.1" max="20"
+                    defaultValue={config.partial_tp1_pct ? (config.partial_tp1_pct * 100).toFixed(1) : '1.5'} />
+                </div>
+                <div className="field">
+                  <label><LabelWithTooltip label="Partial TP Nivel 1 (% qty)" tooltip={TOOLTIPS.partial_tp} /></label>
+                  <input type="number" name="partial_tp1_qty" step="1" min="5" max="90"
+                    defaultValue={config.partial_tp1_qty ? (config.partial_tp1_qty * 100).toFixed(0) : '30'} />
+                </div>
+                <div className="field">
+                  <label><LabelWithTooltip label="Partial TP Nivel 2 (% objetivo)" tooltip={TOOLTIPS.partial_tp} /></label>
+                  <input type="number" name="partial_tp2_pct" step="0.1" min="0.1" max="30"
+                    defaultValue={config.partial_tp2_pct ? (config.partial_tp2_pct * 100).toFixed(1) : '3'} />
+                </div>
+                <div className="field">
+                  <label><LabelWithTooltip label="Partial TP Nivel 2 (% qty)" tooltip={TOOLTIPS.partial_tp} /></label>
+                  <input type="number" name="partial_tp2_qty" step="1" min="5" max="90"
+                    defaultValue={config.partial_tp2_qty ? (config.partial_tp2_qty * 100).toFixed(0) : '30'} />
+                </div>
+                <div className="field">
+                  <label><LabelWithTooltip label="Partial TP Nivel 3 (% objetivo)" tooltip={TOOLTIPS.partial_tp} /></label>
+                  <input type="number" name="partial_tp3_pct" step="0.1" min="0.1" max="50"
+                    defaultValue={config.partial_tp3_pct ? (config.partial_tp3_pct * 100).toFixed(1) : '5'} />
+                </div>
+                <div className="field">
+                  <label><LabelWithTooltip label="Partial TP Nivel 3 (% qty)" tooltip={TOOLTIPS.partial_tp} /></label>
+                  <input type="number" name="partial_tp3_qty" step="1" min="5" max="90"
+                    defaultValue={config.partial_tp3_qty ? (config.partial_tp3_qty * 100).toFixed(0) : '40'} />
                 </div>
                 <div className="field">
                   <label>
-                    <LabelWithTooltip label="Stop Loss Inteligente (IA)" tooltip="Usa la volatilidad del mercado para ajustar dinámicamente el stop-loss y take-profit. Recomendado para mercados volátiles." />
+                    <LabelWithTooltip label="Trailing Stop" tooltip={TOOLTIPS.enable_trailing} />
                   </label>
                   <label className="toggle-wrap">
-                    <input type="checkbox" name="ai_stop_loss" defaultChecked={config.ai_stop_loss_enabled} />
+                    <input type="checkbox" name="enable_trailing" defaultChecked={config.enable_trailing !== false} />
+                    <span className="toggle-track"><span className="toggle-thumb" /></span>
+                  </label>
+                </div>
+                <div className="field">
+                  <label>
+                    <LabelWithTooltip label="Time Exit" tooltip={TOOLTIPS.enable_time_exit} />
+                  </label>
+                  <label className="toggle-wrap">
+                    <input type="checkbox" name="enable_time_exit" defaultChecked={config.enable_time_exit !== false} />
+                    <span className="toggle-track"><span className="toggle-thumb" /></span>
+                  </label>
+                </div>
+                <div className="field">
+                  <label>
+                    <LabelWithTooltip label="Partial TP" tooltip={TOOLTIPS.enable_partial_tp} />
+                  </label>
+                  <label className="toggle-wrap">
+                    <input type="checkbox" name="enable_partial_tp" defaultChecked={config.enable_partial_tp !== false} />
                     <span className="toggle-track"><span className="toggle-thumb" /></span>
                   </label>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                <button type="submit" className="btn-primary" disabled={saving}>
-                  {saving ? 'Guardando...' : 'Guardar Configuración'}
-                </button>
-                <button type="button" className="btn-ghost" onClick={async () => {
-                  try {
-                    const res = await api.suggestConfig()
-                    const sug = res.suggestions || {}
-                    const form = document.querySelector('.settings-form')
-                    if (form) {
-                      if (sug.stop_loss_pct) form.stop_loss_pct.value = (sug.stop_loss_pct * 100).toFixed(1)
-                      if (sug.take_profit_pct) form.take_profit_pct.value = (sug.take_profit_pct * 100).toFixed(1)
-                      if (sug.trade_quantity) form.trade_quantity.value = sug.trade_quantity
-                      if (sug.ma_fast_period) form.ma_fast_period.value = sug.ma_fast_period
-                      if (sug.ma_slow_period) form.ma_slow_period.value = sug.ma_slow_period
-                    }
-                    showMessage('Parámetros sugeridos cargados. Revisa y guarda.')
-                  } catch (e) {
-                    setMessage(`Error: ${e.message}`)
-                  }
-                }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
-                  </svg>
-                  Optimizar con IA
-                </button>
-              </div>
-            </form>
-          )}
-        </div>
+            </div>
+<div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <button type="submit" className="btn-primary" disabled={saving}>
+                {saving ? 'Guardando...' : 'Guardar Configuración'}
+              </button>
+            </div>
+          </form>
+      )}
 
         <div className="settings-section full-width glass">
           <h3>
@@ -400,7 +480,12 @@ export default function AccountSettings({ user, onBack }) {
               <div key={sym} className="symbol-tag">
                 <span>{sym}</span>
                 <button className="symbol-remove" onClick={() => handleRemoveSymbol(sym)}
-                  disabled={config.symbols.length <= 1}>×</button>
+                  disabled={config.symbols.length <= 1} aria-label="Eliminar símbolo">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
               </div>
             ))}
           </div>
@@ -417,5 +502,6 @@ export default function AccountSettings({ user, onBack }) {
         </div>
       </div>
     </div>
+  </div>
   )
 }

@@ -7,11 +7,16 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
 
+RUN useradd --create-home --shell /bin/bash appuser
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend ./backend
 COPY src ./src
+
+RUN chown -R appuser:appuser /app
+USER appuser
 
 EXPOSE 8000
 
