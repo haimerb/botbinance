@@ -5,7 +5,7 @@ def test_open_position():
     rm = RiskManager(stop_loss_pct=0.02, take_profit_pct=0.03, max_position_size=0.01)
     assert rm.open_position(100.0, 0.005) is True
     assert rm.has_position() is True
-    assert rm.entry_price == 100.0
+    assert rm.position.entry_price == 100.0
 
 
 def test_position_exceeds_max_size():
@@ -43,7 +43,7 @@ def test_close_position():
     rm.open_position(100.0, 0.005)
     rm.close_position()
     assert rm.has_position() is False
-    assert rm.entry_price == 0.0
+    assert rm.position is None
 
 
 def test_dynamic_levels():

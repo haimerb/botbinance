@@ -1,8 +1,16 @@
 import hashlib
+import os
 import pandas as pd
 import joblib
 from src.config import MODEL_PATH
 from src.models.trainer import add_technical_features, FEATURE_COLS
+
+
+MODEL_INTEGRITY_HASH = os.getenv("MODEL_INTEGRITY_HASH", "")
+
+
+class ModelIntegrityError(Exception):
+    pass
 
 
 class MLStrategy:
@@ -17,8 +25,25 @@ class MLStrategy:
         self._feature_cache = {}
         self._load_model()
 
+    def _verify_model_integrity(self) -> bool:
+        if not MODEL_INTEGRITY_HASH:
+            return True
+        try:
+            with open(self.model_path, "rb") as f:
+                content = f.read()
+            actual_hash = hashlib.sha256(content).hexdigest()
+            expected_hash = MODEL_INTEGRITY_HASH.split(":")[-1] if ":" in MODEL_INTEGRITY_HASH else MODEL_INTEGRITY_HASH
+            if actual_hash != expected_hash:
+                raise ModelIntegrityError(
+                    f"Model integrity check failed: expected {expected_hash}, got {actual_hash}"
+                )
+            return True
+        except FileNotFoundError:
+            raise ModelIntegrityError(f"Model file not found: {self.model_path}")
+
     def _load_model(self):
         try:
+            self._verify_model_integrity()
             data = joblib.load(self.model_path)
             if isinstance(data, dict):
                 self.dir_model = data.get("dir_model")
@@ -26,6 +51,10 @@ class MLStrategy:
             print("Modelos ML cargados.")
         except FileNotFoundError:
             print("Modelo ML no encontrado. Ejecuta train_model.py")
+        except ModelIntegrityError as e:
+            print(f"ERROR DE INTEGRIDAD DEL MODELO: {e}")
+            self.dir_model = None
+            self.vol_pipeline = None
 
     def _prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
         df_hash = hashlib.md5(pd.util.hash_pandas_object(df).values.tobytes()).hexdigest()

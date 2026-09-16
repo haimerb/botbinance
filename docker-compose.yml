@@ -2,33 +2,57 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: bot
-      POSTGRES_PASSWORD: bot123
-      POSTGRES_DB: binance_bot
+      POSTGRES_USER: ${POSTGRES_USER:-bot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env}
+      POSTGRES_DB: ${POSTGRES_DB:-binance_bot}
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U bot -d binance_bot"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bot} -d ${POSTGRES_DB:-binance_bot}"]
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - db-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      DATABASE_URL: postgresql://bot:bot123@db:5432/binance_bot
+      DATABASE_URL: postgresql://${POSTGRES_USER:-bot}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-binance_bot}
       JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET en el archivo .env}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Define ENCRYPTION_KEY en el archivo .env}
       MOCK_MODE: ${MOCK_MODE:-true}
       USE_TESTNET: ${USE_TESTNET:-true}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:8000}
+      MODEL_INTEGRITY_HASH: ${MODEL_INTEGRITY_HASH:-}
     depends_on:
       db:
         condition: service_healthy
     ports:
       - "8000:8000"
+    networks:
+      - backend-network
+      - db-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   frontend:
     build:
@@ -37,7 +61,24 @@ services:
     depends_on:
       - backend
     ports:
-      - "5173:80"
+      - "5173:8080"
+    networks:
+      - backend-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+networks:
+  db-network:
+    driver: bridge
+    internal: true
+  backend-network:
+    driver: bridge
 
 volumes:
   pgdata:

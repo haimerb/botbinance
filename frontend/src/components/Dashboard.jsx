@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import * as api from '../api'
 import SymbolCard from './SymbolCard'
 import MetricCard from './MetricCard'
-import PriceMiniChart from './PriceMiniChart'
+import PriceChart from './PriceChart'
 import NotificationBanner from './NotificationBanner'
 import TradeTable from './TradeTable'
 
@@ -34,7 +34,7 @@ function Dashboard({ user, onLogout, onAccount }) {
         if (price) {
           const arr = hist[sym] || []
           if (arr.length === 0 || arr[arr.length - 1] !== price) {
-            hist[sym] = [...arr.slice(-29), price]
+            hist[sym] = [...arr.slice(-199), price]
           }
         }
       })
@@ -114,6 +114,7 @@ function Dashboard({ user, onLogout, onAccount }) {
   const currentPrices = state?.current_prices || {}
   const positions = state?.positions || {}
   const signals = state?.signals || {}
+  const strategyDetails = state?.strategy_details || {}
 
   const primaryPrice = currentPrices[activeSymbol] || 0
   const primaryHist = priceHistory[activeSymbol] || []
@@ -121,6 +122,19 @@ function Dashboard({ user, onLogout, onAccount }) {
     ? ((primaryPrice - primaryHist[0]) / primaryHist[0] * 100).toFixed(2)
     : '0.00'
   const primarySig = signals[activeSymbol] || {}
+  const primaryDetails = strategyDetails[activeSymbol] || {}
+  const primaryPosition = positions[activeSymbol]
+
+  const realizedPnl = state?.pnl ?? 0
+  const unrealizedPnl = state?.unrealized_pnl ?? 0
+  const totalPnl = state?.total_pnl ?? 0
+  const dailyPnl = state?.daily_pnl ?? 0
+
+  const pnlPct = state?.initial_balance
+    ? ((totalPnl / state.initial_balance) * 100).toFixed(2)
+    : '0.00'
+
+  const winRate = stats && stats.exits > 0 ? ((stats.wins / stats.exits) * 100).toFixed(1) : '0.0'
 
   return (
     <>
@@ -181,7 +195,6 @@ function Dashboard({ user, onLogout, onAccount }) {
           <span className={priceChange >= 0 ? 'up' : 'down'}>
             {priceChange >= 0 ? '\u25b2' : '\u25bc'} {Math.abs(priceChange)}%
           </span>
-          <PriceMiniChart history={primaryHist} />
         </div>
       </div>
 
@@ -222,22 +235,71 @@ function Dashboard({ user, onLogout, onAccount }) {
       )}
 
       <div className="metrics-grid">
-        <MetricCard title="Precio" value={`$${primaryPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+        <MetricCard title="Precio Actual" value={`$${primaryPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
           sub={state?.last_update ? new Date(state.last_update).toLocaleTimeString() : '--'} trend="info" />
+
         <MetricCard title="Señal MA" value={primarySig.ma || 'HOLD'}
-          sub="Media Móvil" trend={primarySig.ma === 'BUY' ? 'up' : primarySig.ma === 'SELL' ? 'down' : ''} />
+          sub="Media Móvil (EMA 9/21)" trend={primarySig.ma === 'BUY' ? 'up' : primarySig.ma === 'SELL' ? 'down' : ''} />
+
         <MetricCard title="Señal ML" value={primarySig.ml || 'HOLD'}
           sub="Stacking Ensemble" trend={primarySig.ml === 'BUY' ? 'up' : primarySig.ml === 'SELL' ? 'down' : ''} />
+
+        <MetricCard title="Señal Enhanced" value={primarySig.enhanced || 'HOLD'}
+          sub={`Theil-Sen + RSI + ATR`} trend={primarySig.enhanced === 'BUY' ? 'up' : primarySig.enhanced === 'SELL' ? 'down' : ''} />
+
+        <MetricCard title="Consenso Final" value={primarySig.consensus || 'HOLD'}
+          sub="≥2 de 3 estrategias" trend={primarySig.consensus === 'BUY' ? 'up' : primarySig.consensus === 'SELL' ? 'down' : ''} />
+
         <MetricCard title="Balance Total" value={`$${(state?.total_balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
-          sub={`Asignado: $${(state?.balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
-          trend={state?.pnl >= 0 ? 'up' : 'down'} />
-        <MetricCard title="P&L Acumulado" value={`${(state?.total_pnl ?? 0) >= 0 ? '+' : '-'}$${Math.abs(state?.total_pnl ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
-          sub="Realizado + no realizado" trend={(state?.total_pnl ?? 0) >= 0 ? 'up' : 'down'} />
-        <MetricCard title="Posición" value={positions[activeSymbol] ? 'Activa' : '—'}
-          sub={positions[activeSymbol] ? `Entry: $${positions[activeSymbol].entry?.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : 'Esperando'}
-          trend={positions[activeSymbol] ? 'up' : ''} />
-        <MetricCard title="Modelo ML" value={`${state?.model_accuracy || 0}%`}
-          sub="Precisión" trend="info" />
+          sub={`Disponible: $${(state?.balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+          trend={totalPnl >= 0 ? 'up' : 'down'} />
+
+        <MetricCard title="P&L Realizado" value={`${realizedPnl >= 0 ? '+' : ''}$${Math.abs(realizedPnl).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+          sub="Ganancias cerradas" trend={realizedPnl >= 0 ? 'up' : 'down'} />
+
+        <MetricCard title="P&L No Realizado" value={`${unrealizedPnl >= 0 ? '+' : ''}$${Math.abs(unrealizedPnl).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+          sub="Posiciones abiertas" trend={unrealizedPnl >= 0 ? 'up' : 'down'} />
+
+        <MetricCard title="P&L Total" value={`${totalPnl >= 0 ? '+' : ''}$${Math.abs(totalPnl).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+          sub={`(${pnlPct}%) | Hoy: ${dailyPnl >= 0 ? '+' : ''}$${Math.abs(dailyPnl).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+          trend={totalPnl >= 0 ? 'up' : 'down'} />
+
+        <MetricCard title="Posición" value={primaryPosition ? 'ACTIVA' : '—'}
+          sub={primaryPosition ? `Entry: $${primaryPosition.entry?.toLocaleString('en-US', { minimumFractionDigits: 2 })} | Qty: ${primaryPosition.qty}` : 'Esperando señal'}
+          trend={primaryPosition ? 'up' : ''} />
+
+        <MetricCard title="Win Rate" value={`${winRate}%`}
+          sub={`W: ${stats?.wins || 0} / L: ${stats?.losses || 0}`} trend={parseFloat(winRate) >= 50 ? 'up' : 'down'} />
+      </div>
+
+      <div className="chart-section glass">
+        <div className="chart-header">
+          <h2>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 3v18h18"/>
+              <path d="M7 16l4-4 4 4 4-4 4 4"/>
+            </svg>
+            Gráfico de Precio - {activeSymbol?.replace('USDT', '/USDT') || '---'}
+          </h2>
+          <span className="chart-timeframe">
+            {primaryDetails?.buy_score !== undefined ? (
+              <>
+                <span className="detail-badge buy">Buy Score: {primaryDetails.buy_score}/5</span>
+                <span className="detail-badge sell">Sell Score: {primaryDetails.sell_score}/5</span>
+                <span className="detail-badge info">RSI: {primaryDetails.current_rsi?.toFixed(1) || '--'}</span>
+                <span className="detail-badge info">Slope: {primaryDetails.slope ? primaryDetails.slope.toFixed(6) : '--'}</span>
+              </>
+            ) : (
+              <span className="loading-detail">Cargando indicadores...</span>
+            )}
+          </span>
+        </div>
+        <PriceChart
+          history={primaryHist}
+          position={primaryPosition}
+          currentPrice={primaryPrice}
+          priceChange={parseFloat(priceChange)}
+        />
       </div>
 
       {stats && (
@@ -256,7 +318,7 @@ function Dashboard({ user, onLogout, onAccount }) {
           </div>
           <div className="stat-item">
             <span className="stat-label">Win Rate</span>
-            <span className={`stat-value ${stats.win_rate >= 50 ? 'green' : 'red'}`}>{stats.win_rate}%</span>
+            <span className={`stat-value ${parseFloat(winRate) >= 50 ? 'green' : 'red'}`}>{winRate}%</span>
           </div>
           <div className="stat-item">
             <span className="stat-label">P&L Total</span>

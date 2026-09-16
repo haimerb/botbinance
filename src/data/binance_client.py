@@ -1,7 +1,7 @@
 import pandas as pd
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
-from src.config import BINANCE_API_KEY, BINANCE_API_SECRET, USE_TESTNET
+from src.config import BINANCE_API_KEY, BINANCE_API_SECRET, USE_TESTNET, BINANCE_API_URL
 
 
 class BinanceDataClient:
@@ -9,8 +9,7 @@ class BinanceDataClient:
         key = api_key if api_key is not None else BINANCE_API_KEY
         secret = api_secret if api_secret is not None else BINANCE_API_SECRET
         self.client = Client(key, secret)
-        if USE_TESTNET:
-            self.client.API_URL = "https://testnet.binance.vision/api"
+        self.client.API_URL = BINANCE_API_URL
 
     def fetch_klines(
         self, symbol: str, interval: str, limit: int = 500,
