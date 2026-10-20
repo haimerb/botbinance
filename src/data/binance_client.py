@@ -1,15 +1,14 @@
 import pandas as pd
-from binance.client import Client
-from binance.exceptions import BinanceAPIException
-from src.config import BINANCE_API_KEY, BINANCE_API_SECRET, USE_TESTNET, BINANCE_API_URL
+from binance.spot import Spot
+from binance.error import ClientError, ServerError
+from src.config import BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_BASE_URL
 
 
 class BinanceDataClient:
     def __init__(self, api_key: str = None, api_secret: str = None):
         key = api_key if api_key is not None else BINANCE_API_KEY
         secret = api_secret if api_secret is not None else BINANCE_API_SECRET
-        self.client = Client(key, secret)
-        self.client.API_URL = BINANCE_API_URL
+        self.client = Spot(api_key=key, api_secret=secret, base_url=BINANCE_BASE_URL)
 
     def fetch_klines(
         self, symbol: str, interval: str, limit: int = 500,
@@ -17,14 +16,10 @@ class BinanceDataClient:
     ) -> pd.DataFrame:
         try:
             if use_real_api:
-                temp_client = Client()
-                klines = temp_client.get_klines(
-                    symbol=symbol, interval=interval, limit=limit
-                )
+                temp_client = Spot(base_url="https://api.binance.com")
+                klines = temp_client.klines(symbol=symbol, interval=interval, limit=limit)
             else:
-                klines = self.client.get_klines(
-                    symbol=symbol, interval=interval, limit=limit
-                )
+                klines = self.client.klines(symbol=symbol, interval=interval, limit=limit)
             df = pd.DataFrame(klines, columns=[
                 "timestamp", "open", "high", "low", "close", "volume",
                 "close_time", "quote_asset_volume", "number_of_trades",
@@ -34,13 +29,13 @@ class BinanceDataClient:
             for col in ["open", "high", "low", "close", "volume"]:
                 df[col] = df[col].astype(float)
             return df[["timestamp", "open", "high", "low", "close", "volume"]]
-        except BinanceAPIException as e:
+        except (ClientError, ServerError) as e:
             print(f"Error fetching data: {e}")
             return pd.DataFrame()
 
     def get_account_info(self):
         try:
-            return self.client.get_account()
-        except BinanceAPIException as e:
+            return self.client.account()
+        except (ClientError, ServerError) as e:
             print(f"Error getting account info: {e}")
             return {}

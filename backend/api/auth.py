@@ -194,15 +194,14 @@ def save_binance_keys(
     keys: BinanceKeysRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    from binance.client import Client
-    from binance.exceptions import BinanceAPIException
-    from src.config import BINANCE_API_URL
+    from binance.spot import Spot
+    from binance.error import ClientError
+    from src.config import BINANCE_BASE_URL
 
     meta = _client_meta(request)
     try:
-        client = Client(keys.api_key, keys.api_secret)
-        client.API_URL = BINANCE_API_URL
-        account = client.get_account()
+        client = Spot(api_key=keys.api_key, api_secret=keys.api_secret, base_url=BINANCE_BASE_URL)
+        account = client.account()
         can_trade = account.get("canTrade", False)
         update_binance_keys(current_user["sub"], keys.api_key, keys.api_secret)
         log_audit(
@@ -213,14 +212,14 @@ def save_binance_keys(
         )
         _security_alert("api_keys_updated", f"user_id={current_user['sub']}", request)
         return {"status": "ok", "can_trade": can_trade}
-    except BinanceAPIException as e:
+    except ClientError as e:
         log_audit(
             user_id=current_user["sub"],
             event_type="api_keys_update_failed",
-            event_data=f"error={e.message}",
+            event_data=f"error={e.error_message}",
             **meta,
         )
-        raise HTTPException(status_code=400, detail=f"Error Binance: {e.message}")
+        raise HTTPException(status_code=400, detail=f"Error Binance: {e.error_message}")
     except Exception as e:
         log_audit(
             user_id=current_user["sub"],
