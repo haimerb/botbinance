@@ -72,3 +72,35 @@ def test_order_failure_classmethod_defaults():
     assert result.symbol == "ETHUSDT"
     assert result.quantity == 0.5
     assert result.error == "boom"
+
+
+class DryRunSpot:
+    def __init__(self):
+        self.new_order_called = False
+
+    def ticker_price(self, symbol):
+        return {"price": "65000.0"}
+
+    def exchange_info(self, symbol=None):
+        return {"symbols": [{"symbol": symbol, "filters": [
+            {"filterType": "LOT_SIZE", "stepSize": "0.00001", "minQty": "0.00001", "maxQty": "9000"},
+            {"filterType": "NOTIONAL", "minNotional": "5.0"},
+        ]}]}
+
+    def new_order(self, **kwargs):
+        self.new_order_called = True
+        raise AssertionError("dry-run no debe enviar órdenes reales")
+
+
+def test_dry_run_does_not_send_order():
+    ex = TradeExecutor(api_key="k", api_secret="s", dry_run=True)
+    fake = DryRunSpot()
+    ex.client = fake
+    result = ex.execute_order("BUY", 0.001, "BTCUSDT")
+
+    assert fake.new_order_called is False
+    assert result.ok is True
+    assert result.status == "DRY_RUN"
+    assert result.filled_qty == pytest.approx(0.001)
+    assert result.avg_price == pytest.approx(65000.0)
+

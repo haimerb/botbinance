@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from binance.spot import Spot
-from src.config import BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_BASE_URL
+from src.config import BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_BASE_URL, DRY_RUN
 from src.execution.exchange_filters import ExchangeFilters
 
 
@@ -24,17 +24,19 @@ class OrderResult:
 
 
 class TradeExecutor:
-    def __init__(self, api_key: str = None, api_secret: str = None):
+    def __init__(self, api_key: str = None, api_secret: str = None, dry_run: bool = None):
         key = api_key if api_key is not None else BINANCE_API_KEY
         secret = api_secret if api_secret is not None else BINANCE_API_SECRET
         self.client = Spot(api_key=key, api_secret=secret, base_url=BINANCE_BASE_URL)
         self.last_order = None
         self.filters = ExchangeFilters()
+        self.dry_run = DRY_RUN if dry_run is None else dry_run
 
     def execute_order(
         self, side: str, quantity: float, symbol: str = "BTCUSDT", order_type="MARKET"
     ) -> OrderResult:
         qty = quantity
+        ref_price = 0.0
         if order_type == "MARKET":
             ref_price = self.get_symbol_price(symbol)
             qty, _price, error = self.filters.normalize_order(
@@ -43,6 +45,9 @@ class TradeExecutor:
             if error:
                 print(f"Orden rechazada localmente ({symbol} {side}): {error}")
                 return OrderResult.failure(side, symbol, quantity, error)
+
+        if self.dry_run:
+            return self._simulate_order(side, symbol, qty, ref_price)
 
         try:
             order = self.client.new_order(
@@ -69,6 +74,21 @@ class TradeExecutor:
             message = getattr(e, "error_message", None) or str(e)
             print(f"Error ejecutando orden: {message}")
             return OrderResult.failure(side, symbol, quantity, message)
+
+    def _simulate_order(self, side: str, symbol: str, qty: float, ref_price: float) -> OrderResult:
+        """Simula el fill al precio real sin enviar la orden a Binance."""
+        price = ref_price or self.get_symbol_price(symbol)
+        print(f"DRY-RUN: {side} {qty} {symbol} @ {price} (orden simulada)")
+        return OrderResult(
+            ok=True,
+            side=side,
+            symbol=symbol,
+            quantity=qty,
+            order_id=None,
+            status="DRY_RUN",
+            filled_qty=qty,
+            avg_price=price,
+        )
 
     @staticmethod
     def _avg_fill_price(order: dict, fallback_qty: float) -> float:

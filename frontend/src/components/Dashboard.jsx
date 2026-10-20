@@ -111,6 +111,7 @@ function Dashboard({ user, onLogout, onAccount }) {
 
   const isRunning = state?.status === 'running'
   const isMock = state?.mock_mode
+  const isDryRun = state?.dry_run
   const symbols = state?.symbols || []
   const currentPrices = state?.current_prices || {}
   const positions = state?.positions || {}
@@ -156,6 +157,7 @@ function Dashboard({ user, onLogout, onAccount }) {
         </div>
         <div className="header-right">
           {isMock && <span className="badge mock">SIMULACIÓN</span>}
+          {!isMock && isDryRun && <span className="badge mock">DRY-RUN</span>}
           <div className={`badge ${isRunning ? 'running' : 'stopped'}`}>
             <span className="badge-dot" />
             {isRunning ? 'En Vivo' : 'Detenido'}
