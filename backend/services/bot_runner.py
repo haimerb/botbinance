@@ -225,6 +225,36 @@ class BotRunner:
         except Exception:
             pass
 
+    def _reconcile_with_exchange(self, data_client: BinanceDataClient):
+        """Sincroniza el balance/posiciones reales de Binance (USDT) con el estado.
+
+        Si una posición en estado ya no existe en el exchange, se marca como
+        cerrada; si el balance real difiere, se adopta el real. No lanza: si la
+        consulta falla, conserva el estado actual.
+        """
+        try:
+            account = data_client.get_account_info()
+            balances = account.get("balances") if account else None
+            if not balances:
+                return
+
+            real = {b["asset"]: float(b["free"]) + float(b["locked"]) for b in balances}
+
+            with self._lock:
+                for sym, pos in list(self.state["positions"].items()):
+                    if not pos:
+                        continue
+                    base_asset = sym.replace("USDT", "")
+                    held = real.get(base_asset, 0.0)
+                    if held <= 0:
+                        self.state["positions"][sym] = None
+
+                usdt_balance = real.get("USDT")
+                if usdt_balance is not None:
+                    self.state["balance"] = usdt_balance
+        except Exception as e:
+            print(f"Reconciliación con Binance falló: {e}")
+
     def _portfolio_qty(self, symbol: str, price: float, confidences: dict, base_qty: float) -> float:
         """Cantidad a operar según el modo de asignación de cartera.
 
@@ -363,12 +393,14 @@ class BotRunner:
 
             executor = TradeExecutor(api_key=api_key, api_secret=api_secret)
             set_binance_connections(True, True)
+            self._reconcile_with_exchange(data_client)
 
             with self._lock:
                 self.state["status"] = "running"
                 self.state["circuit_breaker_triggered"] = False
             update_bot_status("running")
 
+            loop_count = 0
             while self.running:
                 symbols = list(self.state["symbols"])
                 if not symbols:
@@ -488,51 +520,77 @@ class BotRunner:
                                           ExitReason.TAKE_PROFIT, ExitReason.TIME_EXIT):
                                 if pos:
                                     exit_qty = pos.get("qty", qty)
-                                    executor.execute_order("SELL", exit_qty, sym)
-                                    pnl_pct = (price - pos.get("entry", price)) / pos.get("entry", price) * 100
-                                    self.state["balance"] += price * exit_qty
-                                    self.state["pnl"] += (price - pos.get("entry", price)) * exit_qty
-                                    self.state["daily_pnl"] += (price - pos.get("entry", price)) * exit_qty
+                                    result = executor.execute_order("SELL", exit_qty, sym)
+                                    if not result.ok:
+                                        self._notify_error(
+                                            f"Venta {sym} rechazada por Binance ({reason.value}): {result.error}. "
+                                            f"Posición se mantiene abierta."
+                                        )
+                                        continue
+                                    fill_price = result.avg_price or price
+                                    fill_qty = result.filled_qty or exit_qty
+                                    pnl_pct = (fill_price - pos.get("entry", fill_price)) / pos.get("entry", fill_price) * 100
+                                    self.state["balance"] += fill_price * fill_qty
+                                    self.state["pnl"] += (fill_price - pos.get("entry", fill_price)) * fill_qty
+                                    self.state["daily_pnl"] += (fill_price - pos.get("entry", fill_price)) * fill_qty
                                     with self._lock:
                                         self.state["positions"][sym] = None
                                     rm.close_position(reason)
                                     if self.user_id:
-                                        tid = add_trade(self.user_id, "SELL", price, exit_qty, reason.value, round(pnl_pct, 2), symbol=sym)
+                                        tid = add_trade(self.user_id, "SELL", fill_price, fill_qty, reason.value, round(pnl_pct, 2), symbol=sym)
                                         self.state["last_trade_id"] = tid
 
                             elif reason == ExitReason.PARTIAL_TP:
                                 pass
 
                     elif consensus == "BUY":
-                        if rm.open_position(price, qty):
-                            executor.execute_order("BUY", qty, sym)
+                        if not rm.has_position() and rm.open_position(price, qty):
+                            result = executor.execute_order("BUY", qty, sym)
+                            if not result.ok:
+                                rm.close_position(ExitReason.MANUAL)
+                                self._notify_error(
+                                    f"Compra {sym} rechazada por Binance: {result.error}. "
+                                    f"No se abrió posición."
+                                )
+                                continue
+                            fill_price = result.avg_price or price
+                            fill_qty = result.filled_qty or qty
                             record_trade(sym, "BUY", "filled")
                             with self._lock:
                                 self.state["positions"][sym] = {
-                                    "side": "BUY", "entry": price, "qty": qty,
+                                    "side": "BUY", "entry": fill_price, "qty": fill_qty,
                                     "time": datetime.now().isoformat(),
                                 }
                             if self.user_id:
-                                tid = add_trade(self.user_id, "BUY", price, qty, "entry", symbol=sym)
+                                tid = add_trade(self.user_id, "BUY", fill_price, fill_qty, "entry", symbol=sym)
                                 self.state["last_trade_id"] = tid
-                            self._notify_trade(sym, "BUY", price, qty, None)
+                            self._notify_trade(sym, "BUY", fill_price, fill_qty, None)
 
                     elif consensus == "SELL" and rm.has_position():
                         pos = self.state["positions"].get(sym)
                         if pos:
-                            executor.execute_order("SELL", qty, sym)
+                            exit_qty = pos.get("qty", qty)
+                            result = executor.execute_order("SELL", exit_qty, sym)
+                            if not result.ok:
+                                self._notify_error(
+                                    f"Venta {sym} rechazada por Binance (señal): {result.error}. "
+                                    f"Posición se mantiene abierta."
+                                )
+                                continue
+                            fill_price = result.avg_price or price
+                            fill_qty = result.filled_qty or exit_qty
                             record_trade(sym, "SELL", "filled")
-                            pnl_pct = (price - pos.get("entry", price)) / pos.get("entry", price) * 100
-                            self.state["balance"] += price * qty
-                            self.state["pnl"] += (price - pos.get("entry", price)) * qty
-                            self.state["daily_pnl"] += (price - pos.get("entry", price)) * qty
+                            pnl_pct = (fill_price - pos.get("entry", fill_price)) / pos.get("entry", fill_price) * 100
+                            self.state["balance"] += fill_price * fill_qty
+                            self.state["pnl"] += (fill_price - pos.get("entry", fill_price)) * fill_qty
+                            self.state["daily_pnl"] += (fill_price - pos.get("entry", fill_price)) * fill_qty
                             with self._lock:
                                 self.state["positions"][sym] = None
                             rm.close_position(ExitReason.SIGNAL_REVERSAL)
                             if self.user_id:
-                                tid = add_trade(self.user_id, "SELL", price, qty, "exit", round(pnl_pct, 2), symbol=sym)
+                                tid = add_trade(self.user_id, "SELL", fill_price, fill_qty, "exit", round(pnl_pct, 2), symbol=sym)
                                 self.state["last_trade_id"] = tid
-                            self._notify_trade(sym, "SELL", price, qty, round(pnl_pct, 2))
+                            self._notify_trade(sym, "SELL", fill_price, fill_qty, round(pnl_pct, 2))
 
                     with self._lock:
                         self._refresh_pnl_and_balance()
@@ -552,6 +610,9 @@ class BotRunner:
 
                 with self._lock:
                     self.state["last_update"] = datetime.now().isoformat()
+                loop_count += 1
+                if loop_count % 5 == 0:
+                    self._reconcile_with_exchange(data_client)
                 time.sleep(60)
         except Exception as e:
             with self._lock:
