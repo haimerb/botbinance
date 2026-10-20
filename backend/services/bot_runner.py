@@ -14,9 +14,9 @@ from src.strategy.enhanced_strategy import EnhancedStrategy, MACrossoverEnhanced
 from src.strategy.sentiment import get_analyzer
 from src.execution.trade_executor import TradeExecutor
 from src.risk.risk_manager import RiskManager, ExitReason
-from backend.database import add_trade, get_user_by_id, get_user_by_id_with_keys
-from backend.user_config import load_user_config
-from backend.metrics import (
+from backend.services.database import add_trade, get_user_by_id, get_user_by_id_with_keys
+from backend.services.user_config import load_user_config
+from backend.services.metrics import (
     update_bot_status,
     update_pnl,
     update_circuit_breaker,
@@ -188,14 +188,14 @@ class BotRunner:
 
     def _notify_circuit_breaker(self, reason: str, loss_pct: float):
         try:
-            from backend.notifications import notify_circuit_breaker
+            from backend.services.notifications import notify_circuit_breaker
             notify_circuit_breaker(f"user_{self.user_id}", reason, round(loss_pct, 2))
         except Exception:
             pass
 
     def _notify_trade(self, symbol: str, side: str, price: float, qty: float, pnl_pct=None):
         try:
-            from backend.notifications import notify_trade
+            from backend.services.notifications import notify_trade
             notify_trade(f"user_{self.user_id}", symbol, side, price, qty, pnl_pct)
         except Exception:
             pass

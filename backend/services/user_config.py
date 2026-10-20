@@ -4,7 +4,7 @@ from src.config import (
     TAKE_PROFIT_PCT, MAX_POSITION_SIZE, MA_FAST_PERIOD, MA_SLOW_PERIOD,
     ML_CONFIDENCE_THRESHOLD, BALANCE_ALLOCATION_PCT,
 )
-from backend.database import get_or_create_user_config, update_user_config
+from backend.services.database import get_or_create_user_config, update_user_config
 
 
 DEFAULTS = {
