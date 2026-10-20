@@ -148,3 +148,40 @@ def test_process_exits_partial_tp_keeps_position(runner):
     pos = runner.state["positions"]["BTCUSDT"]
     assert pos is not None
     assert pos["qty"] == pytest.approx(0.007)
+
+
+def test_initial_state_has_no_hardcoded_model_accuracy(runner):
+    assert runner.state["model_accuracy"] is None
+    assert runner.state["model_loaded"] is False
+
+
+def test_refresh_model_metrics_reads_real_values(runner, monkeypatch):
+    class FakeStrategy:
+        def get_metrics(self):
+            return {
+                "model_loaded": True,
+                "model_accuracy": 0.6123,
+                "up_recall": 0.55,
+                "up_precision": 0.60,
+                "vol_accuracy": 0.70,
+                "trained_at": "2026-01-01T00:00:00",
+            }
+
+    runner._ml_strategies["BTCUSDT"] = FakeStrategy()
+    runner._refresh_model_metrics()
+
+    assert runner.state["model_loaded"] is True
+    assert runner.state["model_accuracy"] == 0.6123
+    assert runner.state["model_up_recall"] == 0.55
+
+
+def test_refresh_model_metrics_without_model(runner, monkeypatch):
+    class NoModelStrategy:
+        def get_metrics(self):
+            return {"model_loaded": False, "model_accuracy": None}
+
+    runner._ml_strategies["BTCUSDT"] = NoModelStrategy()
+    runner._refresh_model_metrics()
+
+    assert runner.state["model_loaded"] is False
+    assert runner.state["model_accuracy"] is None
