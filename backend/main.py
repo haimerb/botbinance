@@ -15,6 +15,17 @@ from backend.database import init_db, get_user_by_email, get_user_by_id, get_use
 from backend.auth import hash_password, verify_password, create_token_pair, get_current_user, decode_token, decode_refresh_token
 from backend.user_config import load_user_config, save_user_config
 from backend.security_headers import add_security_headers
+from backend.metrics import (
+    metrics_endpoint,
+    HTTP_REQUESTS_TOTAL,
+    HTTP_REQUEST_DURATION,
+    AUTH_LOGIN_TOTAL,
+    AUTH_MFA_VERIFIED,
+    AUTH_TOKEN_REFRESH,
+    update_bot_status,
+    update_ws_connections,
+    record_ws_message,
+)
 from src.config import BINANCE_API_URL
 
 init_db()
@@ -35,6 +46,29 @@ app.add_middleware(
 )
 
 add_security_headers(app)
+
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    import time
+    start = time.time()
+    response = await call_next(request)
+    duration = time.time() - start
+    HTTP_REQUESTS_TOTAL.labels(
+        method=request.method,
+        endpoint=request.url.path,
+        status=response.status_code
+    ).inc()
+    HTTP_REQUEST_DURATION.labels(
+        method=request.method,
+        endpoint=request.url.path
+    ).observe(duration)
+    return response
+
+
+@app.get("/metrics")
+def metrics():
+    return metrics_endpoint()
 
 
 @app.get("/health")
@@ -60,6 +94,32 @@ def health_check():
     if status_code != 200:
         raise HTTPException(status_code=status_code, detail=checks)
     return checks
+
+
+@app.post("/api/alerts/webhook")
+async def alerts_webhook(payload: dict):
+    alerts = payload.get("alerts", [])
+    received = []
+    for a in alerts:
+        labels = a.get("labels", {})
+        annotations = a.get("annotations", {})
+        entry = {
+            "status": a.get("status"),
+            "alertname": labels.get("alertname"),
+            "severity": labels.get("severity"),
+            "summary": annotations.get("summary"),
+            "description": annotations.get("description"),
+        }
+        received.append(entry)
+        try:
+            from backend.notifications import notify_risk_alert
+            notify_risk_alert(
+                "monitoring",
+                f"[{entry['severity']}] {entry['alertname']}: {entry['summary'] or ''}",
+            )
+        except Exception:
+            pass
+    return {"received": len(alerts), "alerts": received}
 
 
 limiter = Limiter(key_func=get_remote_address)
@@ -152,6 +212,7 @@ def login(request: Request, req: LoginRequest):
             ip_address=ip,
             user_agent=ua,
         )
+        AUTH_LOGIN_TOTAL.labels(status="failed").inc()
         raise HTTPException(status_code=401, detail="Credenciales inválidas")
     
     if user.mfa_enabled:
@@ -167,6 +228,7 @@ def login(request: Request, req: LoginRequest):
                 user_agent=ua,
             )
             raise HTTPException(status_code=401, detail="Código MFA inválido")
+        AUTH_MFA_VERIFIED.labels(status="success").inc()
     
     token = create_token_pair(user.id, user.email)
     log_audit(
@@ -176,6 +238,7 @@ def login(request: Request, req: LoginRequest):
         ip_address=ip,
         user_agent=ua,
     )
+    AUTH_LOGIN_TOTAL.labels(status="success").inc()
     return {
         "token": token["access_token"],
         "refresh_token": token["refresh_token"],
@@ -196,6 +259,7 @@ def refresh_token(request: Request, req: RefreshTokenRequest):
         payload = decode_refresh_token(req.refresh_token)
         user = get_user_by_id(payload["sub"])
         if not user:
+            AUTH_TOKEN_REFRESH.labels(status="failed").inc()
             raise HTTPException(status_code=401, detail="Usuario no encontrado")
         tokens = create_token_pair(user.id, user.email)
         log_audit(
@@ -205,6 +269,7 @@ def refresh_token(request: Request, req: RefreshTokenRequest):
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
         )
+        AUTH_TOKEN_REFRESH.labels(status="success").inc()
         return {
             "token": tokens["access_token"],
             "refresh_token": tokens["refresh_token"],
@@ -214,6 +279,7 @@ def refresh_token(request: Request, req: RefreshTokenRequest):
     except HTTPException:
         raise
     except Exception:
+        AUTH_TOKEN_REFRESH.labels(status="failed").inc()
         raise HTTPException(status_code=401, detail="Token de refresco inválido")
 
 
@@ -594,6 +660,7 @@ def start_bot(request: Request, current_user: dict = Depends(get_current_user)):
     if not mock_mode and (not user.binance_api_key or not user.binance_api_secret):
         raise HTTPException(status_code=400, detail="Configura tus API keys de Binance primero")
     bot.start()
+    update_bot_status("running")
     log_audit(
         user_id=current_user["sub"],
         event_type="bot_started",
@@ -608,6 +675,7 @@ def start_bot(request: Request, current_user: dict = Depends(get_current_user)):
 def stop_bot(request: Request, current_user: dict = Depends(get_current_user)):
     bot.set_user(current_user["sub"])
     bot.stop()
+    update_bot_status("stopped")
     log_audit(
         user_id=current_user["sub"],
         event_type="bot_stopped",
@@ -639,6 +707,46 @@ def get_recent_trades_api(
     return {"trades": get_recent_trades(current_user["sub"], since_id), "since_id": since_id}
 
 
+@app.get("/api/market/klines")
+def get_klines_api(
+    current_user: dict = Depends(get_current_user),
+    symbol: str = Query("BTCUSDT"),
+    interval: str = Query("1h"),
+    limit: int = Query(200, ge=10, le=1000),
+):
+    from src.data.binance_client import BinanceDataClient
+
+    symbol = symbol.upper()
+    if not symbol.endswith(("USDT", "BUSD", "USDC")):
+        symbol = symbol + "USDT"
+    allowed = {"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"}
+    if interval not in allowed:
+        raise HTTPException(status_code=400, detail=f"Intervalo inválido. Permitidos: {sorted(allowed)}")
+
+    try:
+        client = BinanceDataClient()
+        df = client.fetch_klines(symbol, interval, limit=limit, use_real_api=True)
+        if df is None or df.empty:
+            df = client.fetch_klines(symbol, interval, limit=limit, use_real_api=False)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Error obteniendo velas: {e}")
+
+    if df is None or df.empty:
+        return {"symbol": symbol, "interval": interval, "klines": []}
+
+    candles = []
+    for _, row in df.iterrows():
+        candles.append({
+            "time": str(row.get("timestamp", "")),
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row.get("volume", 0) or 0),
+        })
+    return {"symbol": symbol, "interval": interval, "klines": candles}
+
+
 @app.websocket("/api/ws")
 async def websocket_endpoint(ws: WebSocket):
     token = ws.query_params.get("token")
@@ -653,15 +761,19 @@ async def websocket_endpoint(ws: WebSocket):
     
     bot.set_user(current_user["sub"])
     await ws.accept()
+    update_ws_connections(1)
     try:
         while True:
             state = bot.get_state()
             await ws.send_json(state)
+            record_ws_message()
             await asyncio.sleep(1)
     except WebSocketDisconnect:
         pass
     except Exception:
         pass
+    finally:
+        update_ws_connections(-1)
 
 
 @app.get("/api/config/suggest")

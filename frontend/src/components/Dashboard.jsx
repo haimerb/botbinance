@@ -3,6 +3,7 @@ import * as api from '../api'
 import SymbolCard from './SymbolCard'
 import MetricCard from './MetricCard'
 import PriceChart from './PriceChart'
+import TradingViewChart from './TradingViewChart'
 import NotificationBanner from './NotificationBanner'
 import TradeTable from './TradeTable'
 
@@ -300,6 +301,13 @@ function Dashboard({ user, onLogout, onAccount }) {
           currentPrice={primaryPrice}
           priceChange={parseFloat(priceChange)}
         />
+      </div>
+
+      <div className="card tv-chart-card">
+        <div className="card-header">
+          <span className="card-title">Gráfico de velas (Binance)</span>
+        </div>
+        <TradingViewChart symbol={activeSymbol || 'BTCUSDT'} />
       </div>
 
       {stats && (
