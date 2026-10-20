@@ -1,0 +1,15 @@
+[Unit]
+Description=BotBinance PostgreSQL Backup
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/botbinance
+ExecStart=/opt/botbinance/scripts/backup_db.sh --s3 --bucket ${S3_BUCKET} --endpoint ${S3_ENDPOINT}
+EnvironmentFile=/opt/botbinance/.env
+User=botbinance
+Group=botbinance
+
+[Install]
+WantedBy=multi-user.target

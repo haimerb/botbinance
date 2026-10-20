@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily BotBinance Database Backup
+Requires=botbinance-backup.service
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
