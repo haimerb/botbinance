@@ -1,3 +1,5 @@
+import pytest
+
 from src.risk.risk_manager import RiskManager
 
 
@@ -56,3 +58,31 @@ def test_dynamic_levels():
 def test_has_position_no_position():
     rm = RiskManager()
     assert rm.has_position() is False
+
+
+def test_partial_tp_returns_fraction_without_mutating_qty():
+    rm = RiskManager(partial_tp_levels=[(0.01, 0.3), (0.02, 0.3)], enable_partial_tp=True)
+    rm.open_position(100.0, 0.005)
+    partials = rm.check_partial_take_profit(101.5)
+    assert len(partials) == 1
+    tp_price, frac, reason = partials[0]
+    assert tp_price == pytest.approx(101.0)
+    assert frac == 0.3
+    assert reason.value == "partial_tp"
+    assert rm.position.quantity == 0.005
+    assert len(rm.position.take_profit_levels) == 1
+
+
+def test_check_all_exits_includes_partial_fraction():
+    rm = RiskManager(partial_tp_levels=[(0.01, 0.4)], enable_partial_tp=True)
+    rm.open_position(100.0, 0.005)
+    exits = rm.check_all_exits(101.5)
+    partials = [e for e in exits if e[0].value == "partial_tp"]
+    assert len(partials) == 1
+    assert partials[0][2] == 0.4
+
+
+def test_partial_tp_disabled_returns_empty():
+    rm = RiskManager(partial_tp_levels=[(0.01, 0.3)], enable_partial_tp=False)
+    rm.open_position(100.0, 0.005)
+    assert rm.check_partial_take_profit(102.0) == []

@@ -327,6 +327,122 @@ class BotRunner:
         scale = weight * len(symbols) * conf if mode != "equal" else 1.0
         return round(base_qty * max(scale, 0.1), 8)
 
+    def _partial_tp_levels_from_config(self, cfg: dict):
+        """Construye los niveles de take-profit parcial desde la config del usuario."""
+        levels = []
+        for i in (1, 2, 3):
+            pct = cfg.get(f"partial_tp{i}_pct")
+            frac = cfg.get(f"partial_tp{i}_qty")
+            if pct and frac:
+                levels.append((float(pct), float(frac)))
+        return levels
+
+    def _build_risk_manager(self, symbol: str, cfg: dict, atr: float = None) -> RiskManager:
+        """Crea un RiskManager con la configuración del usuario (no con defaults)."""
+        base_sl = cfg.get("stop_loss_pct", 0.02)
+        base_tp = cfg.get("take_profit_pct", 0.03)
+        if cfg.get("ai_stop_loss_enabled", False) and atr is not None:
+            base_sl = min(max(atr * 1.5, 0.01), 0.05)
+            base_tp = min(max(atr * 3, 0.02), 0.08)
+
+        rm = RiskManager(
+            stop_loss_pct=base_sl,
+            take_profit_pct=base_tp,
+            max_position_size=cfg.get("max_position_size", 0.01),
+            trailing_stop_pct=cfg.get("trailing_stop_pct", 0.01),
+            trailing_activation_pct=cfg.get("trailing_activation_pct", 0.015),
+            time_exit_hours=cfg.get("time_exit_hours", 24),
+            partial_tp_levels=self._partial_tp_levels_from_config(cfg) or None,
+            enable_trailing=cfg.get("enable_trailing", True),
+            enable_time_exit=cfg.get("enable_time_exit", True),
+            enable_partial_tp=cfg.get("enable_partial_tp", True),
+        )
+        return rm
+
+    def _round_qty_for(self, executor, symbol: str, qty: float) -> float:
+        """Redondea la cantidad al stepSize del símbolo usando los filtros del executor."""
+        try:
+            filt = executor.filters.ensure(executor.client, symbol)
+            if filt is not None:
+                return executor.filters.round_quantity(qty, filt.step_size)
+        except Exception:
+            pass
+        return qty
+
+    def _get_or_create_risk_manager(self, symbol: str, cfg: dict, df=None) -> RiskManager:
+        """Obtiene el RiskManager del símbolo, creándolo desde la config si falta.
+
+        Aplica stop-loss dinámico si ai_stop_loss_enabled y hay atr_ratio.
+        """
+        atr = None
+        if df is not None and "atr_ratio" in getattr(df, "columns", []):
+            try:
+                atr = float(df["atr_ratio"].iloc[-1])
+            except (IndexError, TypeError, ValueError):
+                atr = None
+
+        rm = self._risk_managers.get(symbol)
+        if not rm:
+            rm = self._build_risk_manager(symbol, cfg, atr)
+            self._risk_managers[symbol] = rm
+        elif cfg.get("ai_stop_loss_enabled", False) and atr is not None:
+            rm.set_dynamic_levels(min(max(atr * 1.5, 0.01), 0.05), min(max(atr * 3, 0.02), 0.08))
+        return rm
+
+    def _close_position_full(self, symbol: str, price: float, reason: ExitReason, qty: float = None):
+        """Cierra la posición completa en estado y registra el trade."""
+        pos = self.state["positions"].get(symbol)
+        if not pos:
+            return
+        exit_qty = qty if qty is not None else pos.get("qty", 0)
+        entry = pos.get("entry", price)
+        pnl_pct = (price - entry) / entry * 100
+        self.state["balance"] += price * exit_qty
+        self.state["pnl"] += (price - entry) * exit_qty
+        self.state["daily_pnl"] += (price - entry) * exit_qty
+        self.state["positions"][symbol] = None
+        if self.user_id:
+            tid = add_trade(self.user_id, "SELL", price, exit_qty, reason.value, round(pnl_pct, 2), symbol=symbol)
+            self.state["last_trade_id"] = tid
+
+    def _execute_partial_tp(self, symbol: str, price: float, tp_qty: float):
+        """Cierra una fracción de la posición (take-profit parcial) manteniendo el resto."""
+        pos = self.state["positions"].get(symbol)
+        if not pos:
+            return
+        remaining = pos.get("qty", 0) - tp_qty
+        if remaining <= 0:
+            return
+        entry = pos.get("entry", price)
+        pnl_pct = (price - entry) / entry * 100
+        self.state["balance"] += price * tp_qty
+        self.state["pnl"] += (price - entry) * tp_qty
+        self.state["daily_pnl"] += (price - entry) * tp_qty
+        self.state["positions"][symbol] = {**pos, "qty": remaining}
+        if self.user_id:
+            tid = add_trade(self.user_id, "SELL", price, tp_qty, ExitReason.PARTIAL_TP.value, round(pnl_pct, 2), symbol=symbol)
+            self.state["last_trade_id"] = tid
+
+    def _process_exits(self, symbol: str, price: float, exits, qty: float, rm: RiskManager):
+        """Aplica las salidas devueltas por check_all_exits.
+
+        El cierre completo usa la cantidad real de la posición; el partial TP
+        cierra la fracción configurada y mantiene el resto abierto.
+        """
+        for reason, _msg, frac in exits:
+            if reason in (ExitReason.STOP_LOSS, ExitReason.TRAILING_STOP,
+                          ExitReason.TAKE_PROFIT, ExitReason.TIME_EXIT):
+                pos = self.state["positions"].get(symbol)
+                if pos:
+                    self._close_position_full(symbol, price, reason)
+                    rm.close_position(reason)
+            elif reason == ExitReason.PARTIAL_TP:
+                pos = self.state["positions"].get(symbol)
+                if pos and frac:
+                    tp_qty = round(pos.get("qty", 0) * frac, 8)
+                    if tp_qty > 0:
+                        self._execute_partial_tp(symbol, price, tp_qty)
+
     def _run_mock(self):
         with self._lock:
             self.state["status"] = "running"
@@ -356,29 +472,12 @@ class BotRunner:
                     record_signal(sym, enh_sig)
                     record_ml_prediction(sym, ml_sig)
                     qty = self.config.get("trade_quantity", TRADE_QUANTITY)
+                    rm = self._get_or_create_risk_manager(sym, self.config)
                     self._mock_trade_logic(sym, price, consensus, qty)
 
-                    rm = self._risk_managers.get(sym)
                     if rm and rm.has_position():
                         exits = rm.check_all_exits(price)
-                        for reason, msg in exits:
-                            if reason in (ExitReason.STOP_LOSS, ExitReason.TRAILING_STOP,
-                                          ExitReason.TAKE_PROFIT, ExitReason.TIME_EXIT):
-                                pos = self.state["positions"].get(sym)
-                                if pos:
-                                    exit_qty = pos.get("qty", qty)
-                                    self.state["balance"] += price * exit_qty
-                                    pnl_pct = (price - pos.get("entry", price)) / pos.get("entry", price) * 100
-                                    self.state["pnl"] += (price - pos.get("entry", price)) * exit_qty
-                                    self.state["daily_pnl"] += (price - pos.get("entry", price)) * exit_qty
-                                    self.state["positions"][sym] = None
-                                    rm.close_position(reason)
-                                    if self.user_id:
-                                        tid = add_trade(self.user_id, "SELL", price, exit_qty, reason.value, round(pnl_pct, 2), symbol=sym)
-                                        self.state["last_trade_id"] = tid
-
-                            elif reason == ExitReason.PARTIAL_TP:
-                                pass
+                        self._process_exits(sym, price, exits, qty, rm)
 
                 self._refresh_pnl_and_balance()
                 pnl_by_symbol = {}
@@ -514,32 +613,7 @@ class BotRunner:
                         if len(hist) > 60:
                             del hist[:-60]
 
-                    rm = self._risk_managers.get(sym)
-                    if not rm:
-                        base_sl = cfg.get("stop_loss_pct", 0.02)
-                        base_tp = cfg.get("take_profit_pct", 0.03)
-                        if cfg.get("ai_stop_loss_enabled", False):
-                            atr = df["atr_ratio"].iloc[-1] if "atr_ratio" in df.columns else 0.02
-                            base_sl = min(max(atr * 1.5, 0.01), 0.05)
-                            base_tp = min(max(atr * 3, 0.02), 0.08)
-
-                        rm = RiskManager(
-                            stop_loss_pct=base_sl,
-                            take_profit_pct=base_tp,
-                            max_position_size=cfg.get("max_position_size", 0.01),
-                            trailing_stop_pct=cfg.get("trailing_stop_pct", 0.01),
-                            trailing_activation_pct=cfg.get("trailing_activation_pct", 0.015),
-                            time_exit_hours=cfg.get("time_exit_hours", 24),
-                            enable_trailing=cfg.get("enable_trailing", True),
-                            enable_time_exit=cfg.get("enable_time_exit", True),
-                            enable_partial_tp=cfg.get("enable_partial_tp", True),
-                        )
-                        self._risk_managers[sym] = rm
-                    elif cfg.get("ai_stop_loss_enabled", False):
-                        atr = df["atr_ratio"].iloc[-1] if "atr_ratio" in df.columns else 0.02
-                        sl = min(max(atr * 1.5, 0.01), 0.05)
-                        tp = min(max(atr * 3, 0.02), 0.08)
-                        rm.set_dynamic_levels(sl, tp)
+                    rm = self._get_or_create_risk_manager(sym, cfg, df)
 
                     base_qty = cfg.get("trade_quantity", TRADE_QUANTITY)
                     confidences = {}
@@ -556,7 +630,7 @@ class BotRunner:
                         exits = rm.check_all_exits(price)
                         pos = self.state["positions"].get(sym)
 
-                        for reason, msg in exits:
+                        for reason, msg, frac in exits:
                             if reason in (ExitReason.STOP_LOSS, ExitReason.TRAILING_STOP,
                                           ExitReason.TAKE_PROFIT, ExitReason.TIME_EXIT):
                                 if pos:
@@ -571,10 +645,10 @@ class BotRunner:
                                     fill_price = result.avg_price or price
                                     fill_qty = result.filled_qty or exit_qty
                                     pnl_pct = (fill_price - pos.get("entry", fill_price)) / pos.get("entry", fill_price) * 100
-                                    self.state["balance"] += fill_price * fill_qty
-                                    self.state["pnl"] += (fill_price - pos.get("entry", fill_price)) * fill_qty
-                                    self.state["daily_pnl"] += (fill_price - pos.get("entry", fill_price)) * fill_qty
                                     with self._lock:
+                                        self.state["balance"] += fill_price * fill_qty
+                                        self.state["pnl"] += (fill_price - pos.get("entry", fill_price)) * fill_qty
+                                        self.state["daily_pnl"] += (fill_price - pos.get("entry", fill_price)) * fill_qty
                                         self.state["positions"][sym] = None
                                     rm.close_position(reason)
                                     if self.user_id:
@@ -582,7 +656,27 @@ class BotRunner:
                                         self.state["last_trade_id"] = tid
 
                             elif reason == ExitReason.PARTIAL_TP:
-                                pass
+                                if pos and frac:
+                                    tp_qty = self._round_qty_for(executor, sym, pos.get("qty", 0) * frac)
+                                    if tp_qty > 0:
+                                        result = executor.execute_order("SELL", tp_qty, sym)
+                                        if not result.ok:
+                                            self._notify_error(
+                                                f"Venta parcial {sym} rechazada por Binance: {result.error}. "
+                                                f"Posición se mantiene abierta."
+                                            )
+                                            continue
+                                        fill_price = result.avg_price or price
+                                        fill_qty = result.filled_qty or tp_qty
+                                        pnl_pct = (fill_price - pos.get("entry", fill_price)) / pos.get("entry", fill_price) * 100
+                                        with self._lock:
+                                            self.state["balance"] += fill_price * fill_qty
+                                            self.state["pnl"] += (fill_price - pos.get("entry", fill_price)) * fill_qty
+                                            self.state["daily_pnl"] += (fill_price - pos.get("entry", fill_price)) * fill_qty
+                                            self.state["positions"][sym] = {**pos, "qty": pos.get("qty", 0) - fill_qty}
+                                        if self.user_id:
+                                            tid = add_trade(self.user_id, "SELL", fill_price, fill_qty, ExitReason.PARTIAL_TP.value, round(pnl_pct, 2), symbol=sym)
+                                            self.state["last_trade_id"] = tid
 
                     elif consensus == "BUY":
                         if not rm.has_position() and rm.open_position(price, qty):

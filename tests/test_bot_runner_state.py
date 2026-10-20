@@ -14,6 +14,7 @@ def runner(monkeypatch):
         "max_total_loss_pct": 10.0,
     })
     monkeypatch.setattr(br_module, "update_bot_status", lambda *a, **k: None)
+    monkeypatch.setattr(br_module, "add_trade", lambda *a, **k: 1)
     return BotRunner(mock_mode=True)
 
 
@@ -77,3 +78,73 @@ def test_prepare_for_start_resets_state(runner):
 
     assert runner.state["balance"] == 10000.0
     assert runner._portfolio_manager is not None
+
+
+def test_build_risk_manager_uses_user_config(runner):
+    cfg = {
+        "stop_loss_pct": 0.04,
+        "take_profit_pct": 0.06,
+        "trailing_stop_pct": 0.02,
+        "trailing_activation_pct": 0.01,
+        "time_exit_hours": 12,
+        "partial_tp1_pct": 0.015,
+        "partial_tp1_qty": 0.3,
+        "partial_tp2_pct": 0.03,
+        "partial_tp2_qty": 0.3,
+        "partial_tp3_pct": 0.05,
+        "partial_tp3_qty": 0.4,
+        "enable_trailing": True,
+        "enable_time_exit": True,
+        "enable_partial_tp": True,
+    }
+    rm = runner._build_risk_manager("BTCUSDT", cfg)
+
+    assert rm.stop_loss_pct == 0.04
+    assert rm.take_profit_pct == 0.06
+    assert rm.time_exit_hours == 12
+    assert rm.partial_tp_levels == [(0.015, 0.3), (0.03, 0.3), (0.05, 0.4)]
+
+
+def test_get_or_create_risk_manager_caches(runner):
+    cfg = {"symbols": ["BTCUSDT"], "stop_loss_pct": 0.02}
+    rm1 = runner._get_or_create_risk_manager("BTCUSDT", cfg)
+    rm2 = runner._get_or_create_risk_manager("BTCUSDT", cfg)
+    assert rm1 is rm2
+
+
+def test_execute_partial_tp_keeps_remaining_position(runner):
+    runner.set_user(1)
+    runner.state["positions"]["BTCUSDT"] = {"side": "BUY", "entry": 100.0, "qty": 0.01}
+
+    runner._execute_partial_tp("BTCUSDT", 101.0, 0.003)
+
+    pos = runner.state["positions"]["BTCUSDT"]
+    assert pos is not None
+    assert pos["qty"] == pytest.approx(0.007)
+
+
+def test_process_exits_full_close_uses_real_qty(runner):
+    from src.risk.risk_manager import RiskManager, ExitReason
+    runner.set_user(1)
+    runner.state["positions"]["BTCUSDT"] = {"side": "BUY", "entry": 100.0, "qty": 0.01}
+    rm = RiskManager(stop_loss_pct=0.02)
+    rm.open_position(100.0, 0.01)
+
+    runner._process_exits("BTCUSDT", 97.0, [(ExitReason.STOP_LOSS, "sl", None)], 0.01, rm)
+
+    assert runner.state["positions"]["BTCUSDT"] is None
+    assert rm.has_position() is False
+
+
+def test_process_exits_partial_tp_keeps_position(runner):
+    from src.risk.risk_manager import RiskManager, ExitReason
+    runner.set_user(1)
+    runner.state["positions"]["BTCUSDT"] = {"side": "BUY", "entry": 100.0, "qty": 0.01}
+    rm = RiskManager(max_position_size=1.0)
+    rm.open_position(100.0, 0.01)
+
+    runner._process_exits("BTCUSDT", 101.0, [(ExitReason.PARTIAL_TP, "tp", 0.3)], 0.01, rm)
+
+    pos = runner.state["positions"]["BTCUSDT"]
+    assert pos is not None
+    assert pos["qty"] == pytest.approx(0.007)
