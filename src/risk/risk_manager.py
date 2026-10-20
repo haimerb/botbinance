@@ -77,7 +77,7 @@ class RiskManager:
 
         if self.enable_partial_tp:
             self.position.take_profit_levels = [
-                (price * (1 + pct), qty_pct * quantity)
+                (price * (1 + pct), qty_pct)
                 for pct, qty_pct in self.partial_tp_levels
             ]
 
@@ -131,40 +131,48 @@ class RiskManager:
         return elapsed >= timedelta(hours=self.time_exit_hours)
 
     def check_partial_take_profit(self, current_price: float) -> List[Tuple[float, float, ExitReason]]:
+        """Devuelve los niveles de TP parcial alcanzados como (precio, fracción).
+
+        No modifica la cantidad de la posición: el llamador aplica la fracción
+        sobre la cantidad real y mantiene el resto abierto.
+        """
         if self.position is None or not self.enable_partial_tp:
             return []
 
         executed = []
         remaining_levels = []
 
-        for tp_price, tp_qty in self.position.take_profit_levels:
+        for tp_price, tp_frac in self.position.take_profit_levels:
             if current_price >= tp_price:
-                executed.append((tp_price, tp_qty, ExitReason.PARTIAL_TP))
-                self.position.quantity -= tp_qty
+                executed.append((tp_price, tp_frac, ExitReason.PARTIAL_TP))
             else:
-                remaining_levels.append((tp_price, tp_qty))
+                remaining_levels.append((tp_price, tp_frac))
 
         self.position.take_profit_levels = remaining_levels
         return executed
 
-    def check_all_exits(self, current_price: float) -> List[Tuple[ExitReason, str]]:
+    def check_all_exits(self, current_price: float) -> List[Tuple[ExitReason, str, Optional[float]]]:
+        """Lista de salidas como (reason, mensaje, fracción).
+
+        La fracción solo es relevante para PARTIAL_TP (None en el resto).
+        """
         exits = []
 
         if self.check_stop_loss(current_price):
-            exits.append((ExitReason.STOP_LOSS, f"Stop loss hit at {current_price:.2f}"))
+            exits.append((ExitReason.STOP_LOSS, f"Stop loss hit at {current_price:.2f}", None))
 
         if self.check_trailing_stop(current_price):
-            exits.append((ExitReason.TRAILING_STOP, f"Trailing stop hit at {current_price:.2f}"))
+            exits.append((ExitReason.TRAILING_STOP, f"Trailing stop hit at {current_price:.2f}", None))
 
         if self.check_time_exit():
-            exits.append((ExitReason.TIME_EXIT, f"Time exit after {self.time_exit_hours}h"))
+            exits.append((ExitReason.TIME_EXIT, f"Time exit after {self.time_exit_hours}h", None))
 
         if self.check_take_profit(current_price):
-            exits.append((ExitReason.TAKE_PROFIT, f"Take profit hit at {current_price:.2f}"))
+            exits.append((ExitReason.TAKE_PROFIT, f"Take profit hit at {current_price:.2f}", None))
 
         partials = self.check_partial_take_profit(current_price)
-        for tp_price, tp_qty, reason in partials:
-            exits.append((reason, f"Partial TP at {tp_price:.2f} for {tp_qty}"))
+        for tp_price, tp_frac, reason in partials:
+            exits.append((reason, f"Partial TP at {tp_price:.2f} for {tp_frac:.0%}", tp_frac))
 
         return exits
 
