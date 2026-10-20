@@ -31,7 +31,6 @@ class BacktestEngine:
         if side == "BUY":
             return price * (1 + self.slippage_pct)
         return price * (1 - self.slippage_pct)
-
     def _commission(self, price: float, qty: float) -> float:
         return price * qty * self.commission_pct
 
@@ -48,13 +47,53 @@ class BacktestEngine:
         except Exception:
             return None
 
+    def generate_signals(self, df: pd.DataFrame, signal_fn=None) -> pd.DataFrame:
+        """Genera la columna 'signal' para el backtest.
+
+        Si ``signal_fn`` se entrega, se aplica directamente. Si no, se usa
+        ``EnhancedStrategy`` para evaluar cada ventana y etiquetar BUY/SELL/HOLD.
+        Devuelve una copia del DataFrame con la columna 'signal' agregada.
+        """
+        if df is None or df.empty:
+            return df
+        df = df.copy()
+        if signal_fn is not None:
+            df["signal"] = signal_fn(df)
+            return df
+
+        from src.strategy.enhanced_strategy import EnhancedStrategy
+
+        strategy = EnhancedStrategy()
+        min_len = max(
+            strategy.theil_window, strategy.ema_slow, strategy.rsi_period,
+            strategy.atr_period, strategy.macd_slow + strategy.macd_signal,
+            strategy.bb_period, strategy.volume_period,
+        ) + 5
+        signals = ["HOLD"] * len(df)
+        for i in range(len(df)):
+            if i + 1 < min_len:
+                continue
+            window = df.iloc[max(0, i + 1 - (min_len + 20)):i + 1]
+            try:
+                result = strategy.generate_signal(window)
+                signals[i] = result.signal
+            except Exception:
+                signals[i] = "HOLD"
+        df["signal"] = signals
+        return df
+
     def run(self, df: pd.DataFrame, symbol: str = "BTCUSDT",
             signal_col: str = "signal", verbose: bool = False) -> dict:
         """Ejecuta el backtest sobre un DataFrame con columna de señales.
 
         df debe contener: timestamp, close y la columna de señales (BUY/SELL/HOLD).
+        Si la columna de señales no existe, se genera con ``generate_signals``.
         """
-        if df is None or df.empty or signal_col not in df.columns:
+        if df is None or df.empty:
+            return {"error": "datos o señales insuficientes"}
+        if signal_col not in df.columns:
+            df = self.generate_signals(df, signal_fn=None)
+        if signal_col not in df.columns:
             return {"error": "datos o señales insuficientes"}
 
         balance = self.initial_balance

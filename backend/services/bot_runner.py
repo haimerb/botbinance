@@ -65,6 +65,9 @@ class BotRunner:
         self._enhanced_strategies = {}
         self._ma_strategies = {}
         self._ml_strategies = {}
+        self._portfolio_manager = None
+        self._symbol_weights = {}
+        self._price_history = {}
 
     def set_user(self, user_id: int):
         with self._lock:
@@ -92,6 +95,11 @@ class BotRunner:
                 self._enhanced_strategies.clear()
                 self._ma_strategies.clear()
                 self._ml_strategies.clear()
+                from src.risk.portfolio_manager import PortfolioManager
+                mode = self.config.get("portfolio_allocation_mode", "equal")
+                self._portfolio_manager = PortfolioManager(mode=mode)
+                self._symbol_weights = {}
+                self._price_history = {}
         update_bot_status("stopped")
 
     def _mock_tick(self, symbol: str) -> float:
@@ -187,18 +195,66 @@ class BotRunner:
         return False
 
     def _notify_circuit_breaker(self, reason: str, loss_pct: float):
+        email = f"user_{self.user_id}"
         try:
-            from backend.services.notifications import notify_circuit_breaker
-            notify_circuit_breaker(f"user_{self.user_id}", reason, round(loss_pct, 2))
+            from backend.workers.tasks import send_circuit_breaker_alert
+            send_circuit_breaker_alert.delay(email, reason, round(loss_pct, 2))
+        except Exception:
+            try:
+                from backend.services.notifications import notify_circuit_breaker
+                notify_circuit_breaker(email, reason, round(loss_pct, 2))
+            except Exception:
+                pass
+
+    def _notify_trade(self, symbol: str, side: str, price: float, qty: float, pnl_pct=None):
+        email = f"user_{self.user_id}"
+        try:
+            from backend.workers.tasks import send_trade_notification
+            send_trade_notification.delay(email, symbol, side, price, qty, pnl_pct)
+        except Exception:
+            try:
+                from backend.services.notifications import notify_trade
+                notify_trade(email, symbol, side, price, qty, pnl_pct)
+            except Exception:
+                pass
+
+    def _notify_error(self, error: str):
+        try:
+            from backend.services.notifications import notify_bot_error
+            notify_bot_error(f"user_{self.user_id}", error)
         except Exception:
             pass
 
-    def _notify_trade(self, symbol: str, side: str, price: float, qty: float, pnl_pct=None):
-        try:
-            from backend.services.notifications import notify_trade
-            notify_trade(f"user_{self.user_id}", symbol, side, price, qty, pnl_pct)
-        except Exception:
-            pass
+    def _portfolio_qty(self, symbol: str, price: float, confidences: dict, base_qty: float) -> float:
+        """Cantidad a operar según el modo de asignación de cartera.
+
+        La confianza del modelo escala la cantidad base; el peso de cartera del
+        símbolo (volatilidad/confianza) modula la exposición relativa.
+        """
+        if not self._portfolio_manager or price <= 0:
+            return base_qty
+
+        history = self._price_history.get(symbol, [])
+        from src.risk.portfolio_manager import PortfolioManager
+        volatility = PortfolioManager.compute_volatility(history) if len(history) >= 2 else 0.02
+
+        symbols = list(self.state["symbols"])
+        volatilities = {}
+        for s in symbols:
+            hist = self._price_history.get(s, [])
+            volatilities[s] = PortfolioManager.compute_volatility(hist) if len(hist) >= 2 else 0.02
+
+        mode = self._portfolio_manager.mode
+        if mode == "equal":
+            weight = 1.0 / len(symbols) if symbols else 1.0
+        else:
+            weights = self._portfolio_manager.compute_weights(symbols, volatilities, confidences)
+            self._symbol_weights = weights
+            weight = weights.get(symbol, 1.0 / len(symbols) if symbols else 1.0)
+
+        conf = max(float(confidences.get(symbol, 1.0)), 0.1)
+        scale = weight * len(symbols) * conf if mode != "equal" else 1.0
+        return round(base_qty * max(scale, 0.1), 8)
 
     def _run_mock(self):
         with self._lock:
@@ -380,6 +436,10 @@ class BotRunner:
                                 **enhanced_result.details,
                                 "sentiment": sentiment_info,
                             }
+                        hist = self._price_history.setdefault(sym, [])
+                        hist.append(price)
+                        if len(hist) > 60:
+                            del hist[:-60]
 
                     rm = self._risk_managers.get(sym)
                     if not rm:
@@ -408,7 +468,16 @@ class BotRunner:
                         tp = min(max(atr * 3, 0.02), 0.08)
                         rm.set_dynamic_levels(sl, tp)
 
-                    qty = cfg.get("trade_quantity", TRADE_QUANTITY)
+                    base_qty = cfg.get("trade_quantity", TRADE_QUANTITY)
+                    confidences = {}
+                    for s in symbols:
+                        det = self.state["strategy_details"].get(s, {})
+                        conf = det.get("confidence")
+                        signals = self.state["signals"].get(s, {})
+                        if conf is None:
+                            conf = 0.6 if signals.get("consensus") == "BUY" else 0.4
+                        confidences[s] = float(conf)
+                    qty = self._portfolio_qty(sym, price, confidences, base_qty)
 
                     if rm.has_position():
                         exits = rm.check_all_exits(price)
@@ -488,6 +557,7 @@ class BotRunner:
             with self._lock:
                 self.state["status"] = f"error: {e}"
             update_bot_status("error")
+            self._notify_error(str(e))
         finally:
             set_binance_connections(False, False)
             update_bot_status("stopped")
