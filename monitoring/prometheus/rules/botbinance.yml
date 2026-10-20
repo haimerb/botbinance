@@ -1,0 +1,132 @@
+groups:
+  - name: botbinance_trading
+    interval: 30s
+    rules:
+      - alert: BotDown
+        expr: botbinance_bot_status{status="running"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "BotBinance trading bot is down"
+          description: "Bot has been stopped or crashed for more than 1 minute"
+
+      - alert: CircuitBreakerTriggered
+        expr: increase(botbinance_circuit_breaker_triggered_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Circuit breaker triggered"
+          description: "Trading stopped due to {{ $labels.type }} loss limit exceeded"
+
+      - alert: HighDailyLoss
+        expr: botbinance_daily_loss_pct > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Daily loss approaching circuit breaker"
+          description: "Daily loss is {{ $value }}%, circuit breaker at 5%"
+
+      - alert: HighTotalLoss
+        expr: botbinance_total_loss_pct > 7
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Total loss approaching circuit breaker"
+          description: "Total loss is {{ $value }}%, circuit breaker at 10%"
+
+      - alert: BinanceConnectionLost
+        expr: botbinance_trade_executor_connected == 0 or botbinance_data_client_connected == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Binance API connection lost"
+          description: "Cannot connect to Binance API for trading or data"
+
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.95, sum(rate(botbinance_http_request_duration_seconds_bucket[5m])) by (le)) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API latency"
+          description: "P95 latency is {{ $value }}s"
+
+      - alert: HighErrorRate
+        expr: rate(botbinance_http_requests_total{status=~"5.."}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High 5xx error rate"
+          description: "5xx error rate is {{ $value }} per second"
+
+      - alert: HighFailedLogins
+        expr: rate(botbinance_auth_login_failed_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High failed login rate"
+          description: "More than 10 failed logins per minute - possible brute force"
+
+      - alert: MLModelErrors
+        expr: rate(botbinance_ml_model_errors_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ML model errors increasing"
+          description: "ML model error rate is {{ $value }} per minute"
+
+      - alert: WebSocketReconnects
+        expr: rate(botbinance_ws_reconnect_total[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High WebSocket reconnect rate"
+          description: "Clients reconnecting frequently ({{ $value }}/min)"
+
+  - name: botbinance_infrastructure
+    interval: 30s
+    rules:
+      - alert: HighCPUUsage
+        expr: botbinance_cpu_usage_percent > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage"
+          description: "Backend CPU usage is {{ $value }}%"
+
+      - alert: HighMemoryUsage
+        expr: botbinance_memory_usage_percent > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage"
+          description: "Backend memory usage is {{ $value }}%"
+
+      - alert: DatabaseConnectionsHigh
+        expr: botbinance_db_connections_active > 15
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High database connections"
+          description: "{{ $value }} active connections"
+
+      - alert: PrometheusTargetDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus target down"
+          description: "{{ $labels.job }} target has been down for 1 minute"
