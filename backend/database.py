@@ -61,6 +61,8 @@ class UserConfig(Base):
     enable_partial_tp = Column(Integer, default=1)
     max_daily_loss_pct = Column(Float, default=5.0)
     max_total_loss_pct = Column(Float, default=10.0)
+    sentiment_enabled = Column(Integer, default=1)
+    portfolio_allocation_mode = Column(String(20), default="equal")
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
@@ -68,14 +70,14 @@ class Trade(Base):
     __tablename__ = "trades"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    symbol = Column(String(20), default="BTCUSDT")
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    symbol = Column(String(20), default="BTCUSDT", index=True)
     side = Column(String(10), nullable=False)
     price = Column(Float, nullable=False)
     qty = Column(Float, nullable=False)
     trade_type = Column(String(20), nullable=False)
     pnl_pct = Column(Float, nullable=True)
-    timestamp = Column(DateTime, default=datetime.now)
+    timestamp = Column(DateTime, default=datetime.now, index=True)
 
 
 class BotState(Base):
@@ -131,8 +133,15 @@ def init_db():
             "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS enable_partial_tp INTEGER DEFAULT 1",
             "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS max_daily_loss_pct FLOAT DEFAULT 5.0",
             "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS max_total_loss_pct FLOAT DEFAULT 10.0",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS sentiment_enabled INTEGER DEFAULT 1",
+            "ALTER TABLE user_configs ADD COLUMN IF NOT EXISTS portfolio_allocation_mode VARCHAR(20) DEFAULT 'equal'",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret TEXT DEFAULT ''",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled INTEGER DEFAULT 0",
+            "CREATE INDEX IF NOT EXISTS idx_trades_user_symbol_time ON trades (user_id, symbol, timestamp DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_trades_user_type ON trades (user_id, trade_type)",
+            "CREATE INDEX IF NOT EXISTS idx_audit_user_event_time ON audit_logs (user_id, event_type, timestamp DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_bot_state_user_key ON bot_state (user_id, key)",
+            "CREATE INDEX IF NOT EXISTS idx_error_logs_timestamp ON error_logs (timestamp DESC)",
         ]:
             try:
                 session.execute(text(stmt))

@@ -3,6 +3,7 @@ import threading
 import time
 import random
 import math
+import psutil
 from datetime import datetime
 from typing import Optional
 
@@ -11,10 +12,23 @@ from src.data.binance_client import BinanceDataClient
 from src.strategy.ma_crossover import MACrossoverStrategy
 from src.strategy.ml_strategy import MLStrategy
 from src.strategy.enhanced_strategy import EnhancedStrategy, MACrossoverEnhanced, SignalResult
+from src.strategy.sentiment import get_analyzer
 from src.execution.trade_executor import TradeExecutor
 from src.risk.risk_manager import RiskManager, ExitReason
 from backend.database import add_trade, get_user_by_id, get_user_by_id_with_keys
 from backend.user_config import load_user_config
+from backend.metrics import (
+    update_bot_status,
+    update_pnl,
+    update_circuit_breaker,
+    record_trade,
+    record_signal,
+    record_ml_prediction,
+    record_ml_error,
+    set_binance_connections,
+    update_system_metrics,
+    update_risk_metrics,
+)
 
 
 class BotRunner:
@@ -79,6 +93,7 @@ class BotRunner:
                 self._enhanced_strategies.clear()
                 self._ma_strategies.clear()
                 self._ml_strategies.clear()
+        update_bot_status("stopped")
 
     def _mock_tick(self, symbol: str) -> float:
         phase = self.mock_phases.get(symbol, 0.0)
@@ -128,6 +143,7 @@ class BotRunner:
             }
             if rm:
                 rm.open_position(price, qty)
+            record_trade(symbol, "BUY", "filled")
             if self.user_id:
                 tid = add_trade(self.user_id, "BUY", price, qty, "entry", symbol=symbol)
                 self.state["last_trade_id"] = tid
@@ -141,6 +157,7 @@ class BotRunner:
             self.state["positions"][symbol] = None
             if rm:
                 rm.close_position(ExitReason.SIGNAL_REVERSAL)
+            record_trade(symbol, "SELL", "filled")
             if self.user_id:
                 tid = add_trade(self.user_id, "SELL", price, qty, "exit", round(pnl_pct, 2), symbol=symbol)
                 self.state["last_trade_id"] = tid
@@ -159,19 +176,37 @@ class BotRunner:
         if daily_loss_pct >= max_daily_loss:
             self.state["circuit_breaker_triggered"] = True
             self.state["status"] = f"circuit_breaker: max daily loss ({max_daily_loss*100:.1f}%) exceeded"
+            self._notify_circuit_breaker("max daily loss", daily_loss_pct * 100)
             return True
         
         if total_loss_pct >= max_total_loss:
             self.state["circuit_breaker_triggered"] = True
             self.state["status"] = f"circuit_breaker: max total loss ({max_total_loss*100:.1f}%) exceeded"
+            self._notify_circuit_breaker("max total loss", total_loss_pct * 100)
             return True
         
         return False
+
+    def _notify_circuit_breaker(self, reason: str, loss_pct: float):
+        try:
+            from backend.notifications import notify_circuit_breaker
+            notify_circuit_breaker(f"user_{self.user_id}", reason, round(loss_pct, 2))
+        except Exception:
+            pass
+
+    def _notify_trade(self, symbol: str, side: str, price: float, qty: float, pnl_pct=None):
+        try:
+            from backend.notifications import notify_trade
+            notify_trade(f"user_{self.user_id}", symbol, side, price, qty, pnl_pct)
+        except Exception:
+            pass
 
     def _run_mock(self):
         with self._lock:
             self.state["status"] = "running"
             self.state["circuit_breaker_triggered"] = False
+        update_bot_status("running")
+        set_binance_connections(True, True)
         while self.running:
             with self._lock:
                 symbols = list(self.state["symbols"])
@@ -180,6 +215,7 @@ class BotRunner:
                 continue
             with self._lock:
                 if self._check_circuit_breakers():
+                    update_bot_status("circuit_breaker")
                     self.running = False
                     break
                 for sym in symbols:
@@ -189,6 +225,10 @@ class BotRunner:
                     self.state["signals"][sym] = {
                         "ma": ma_sig, "ml": ml_sig, "enhanced": enh_sig, "consensus": consensus
                     }
+                    record_signal(sym, ma_sig)
+                    record_signal(sym, ml_sig)
+                    record_signal(sym, enh_sig)
+                    record_ml_prediction(sym, ml_sig)
                     qty = self.config.get("trade_quantity", TRADE_QUANTITY)
                     self._mock_trade_logic(sym, price, consensus, qty)
 
@@ -215,14 +255,30 @@ class BotRunner:
                                 pass
 
                 self._refresh_pnl_and_balance()
+                pnl_by_symbol = {}
+                for sym, pos in self.state["positions"].items():
+                    if pos:
+                        entry = pos.get("entry", 0)
+                        qty = pos.get("qty", 0)
+                        current = self.state["current_prices"].get(sym, entry)
+                        pnl_by_symbol[sym] = (current - entry) * qty
+                update_pnl(self.state["total_pnl"], pnl_by_symbol)
+                update_circuit_breaker(
+                    (abs(self.state["daily_pnl"]) / self.state.get("initial_balance", 10000.0)) * 100 if self.state["daily_pnl"] < 0 else 0,
+                    (abs(self.state["pnl"]) / self.state.get("initial_balance", 10000.0)) * 100 if self.state["pnl"] < 0 else 0
+                )
+                update_system_metrics(psutil.cpu_percent(), psutil.virtual_memory().percent)
                 self.state["last_update"] = datetime.now().isoformat()
             time.sleep(2)
+        update_bot_status("stopped")
+        set_binance_connections(False, False)
 
     def _run_live(self):
         try:
             user = get_user_by_id_with_keys(self.user_id) if self.user_id else None
             if not user or not user.binance_api_key or not user.binance_api_secret:
                 self.state["status"] = "error: API keys no configuradas"
+                update_bot_status("error")
                 return
 
             api_key = user.binance_api_key
@@ -251,10 +307,12 @@ class BotRunner:
                     )
 
             executor = TradeExecutor(api_key=api_key, api_secret=api_secret)
+            set_binance_connections(True, True)
 
             with self._lock:
                 self.state["status"] = "running"
                 self.state["circuit_breaker_triggered"] = False
+            update_bot_status("running")
 
             while self.running:
                 symbols = list(self.state["symbols"])
@@ -264,6 +322,7 @@ class BotRunner:
 
                 with self._lock:
                     if self._check_circuit_breakers():
+                        update_bot_status("circuit_breaker")
                         self.running = False
                         break
 
@@ -276,6 +335,11 @@ class BotRunner:
                     ml_signal = self._ml_strategies[sym].generate_signal(df)
                     enhanced_result = self._enhanced_strategies[sym].generate_signal(df)
 
+                    record_signal(sym, ma_signal)
+                    record_signal(sym, ml_signal)
+                    record_signal(sym, enhanced_result.signal)
+                    record_ml_prediction(sym, ml_signal)
+
                     consensus_signals = [ma_signal, ml_signal, enhanced_result.signal]
                     buy_votes = consensus_signals.count("BUY")
                     sell_votes = consensus_signals.count("SELL")
@@ -285,6 +349,19 @@ class BotRunner:
                         consensus = "SELL"
                     else:
                         consensus = "HOLD"
+
+                    sentiment_info = {}
+                    if cfg.get("sentiment_enabled", True):
+                        try:
+                            analyzer = get_analyzer()
+                            adjusted, reason = analyzer.filter_signal(sym, consensus)
+                            sentiment_info = analyzer.get_sentiment(sym)
+                            if adjusted != consensus:
+                                sentiment_info["filtered_from"] = consensus
+                                sentiment_info["filter_reason"] = reason
+                                consensus = adjusted
+                        except Exception:
+                            pass
 
                     price = executor.get_symbol_price(sym)
                     if price == 0.0:
@@ -299,6 +376,11 @@ class BotRunner:
                             "consensus": consensus,
                         }
                         self.state["strategy_details"][sym] = enhanced_result.details
+                        if sentiment_info:
+                            self.state["strategy_details"][sym] = {
+                                **enhanced_result.details,
+                                "sentiment": sentiment_info,
+                            }
 
                     rm = self._risk_managers.get(sym)
                     if not rm:
@@ -356,6 +438,7 @@ class BotRunner:
                     elif consensus == "BUY":
                         if rm.open_position(price, qty):
                             executor.execute_order("BUY", qty, sym)
+                            record_trade(sym, "BUY", "filled")
                             with self._lock:
                                 self.state["positions"][sym] = {
                                     "side": "BUY", "entry": price, "qty": qty,
@@ -364,11 +447,13 @@ class BotRunner:
                             if self.user_id:
                                 tid = add_trade(self.user_id, "BUY", price, qty, "entry", symbol=sym)
                                 self.state["last_trade_id"] = tid
+                            self._notify_trade(sym, "BUY", price, qty, None)
 
                     elif consensus == "SELL" and rm.has_position():
                         pos = self.state["positions"].get(sym)
                         if pos:
                             executor.execute_order("SELL", qty, sym)
+                            record_trade(sym, "SELL", "filled")
                             pnl_pct = (price - pos.get("entry", price)) / pos.get("entry", price) * 100
                             self.state["balance"] += price * qty
                             self.state["pnl"] += (price - pos.get("entry", price)) * qty
@@ -379,9 +464,23 @@ class BotRunner:
                             if self.user_id:
                                 tid = add_trade(self.user_id, "SELL", price, qty, "exit", round(pnl_pct, 2), symbol=sym)
                                 self.state["last_trade_id"] = tid
+                            self._notify_trade(sym, "SELL", price, qty, round(pnl_pct, 2))
 
                     with self._lock:
                         self._refresh_pnl_and_balance()
+                        pnl_by_symbol = {}
+                        for s, p in self.state["positions"].items():
+                            if p:
+                                entry = p.get("entry", 0)
+                                q = p.get("qty", 0)
+                                current = self.state["current_prices"].get(s, entry)
+                                pnl_by_symbol[s] = (current - entry) * q
+                        update_pnl(self.state["total_pnl"], pnl_by_symbol)
+                        update_circuit_breaker(
+                            (abs(self.state["daily_pnl"]) / self.state.get("initial_balance", 10000.0)) * 100 if self.state["daily_pnl"] < 0 else 0,
+                            (abs(self.state["pnl"]) / self.state.get("initial_balance", 10000.0)) * 100 if self.state["pnl"] < 0 else 0
+                        )
+                        update_system_metrics(psutil.cpu_percent(), psutil.virtual_memory().percent)
 
                 with self._lock:
                     self.state["last_update"] = datetime.now().isoformat()
@@ -389,6 +488,10 @@ class BotRunner:
         except Exception as e:
             with self._lock:
                 self.state["status"] = f"error: {e}"
+            update_bot_status("error")
+        finally:
+            set_binance_connections(False, False)
+            update_bot_status("stopped")
 
     def _run_loop(self):
         if self.mock_mode:

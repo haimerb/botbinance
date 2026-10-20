@@ -34,6 +34,8 @@ DEFAULTS = {
     "enable_partial_tp": True,
     "max_daily_loss_pct": 5.0,
     "max_total_loss_pct": 10.0,
+    "sentiment_enabled": True,
+    "portfolio_allocation_mode": "equal",
 }
 
 
@@ -66,6 +68,8 @@ def load_user_config(user_id: int) -> dict:
     config["enable_partial_tp"] = bool(cfg.enable_partial_tp) if cfg.enable_partial_tp is not None else True
     config["max_daily_loss_pct"] = cfg.max_daily_loss_pct if cfg.max_daily_loss_pct is not None else 5.0
     config["max_total_loss_pct"] = cfg.max_total_loss_pct if cfg.max_total_loss_pct is not None else 10.0
+    config["sentiment_enabled"] = bool(cfg.sentiment_enabled) if cfg.sentiment_enabled is not None else True
+    config["portfolio_allocation_mode"] = cfg.portfolio_allocation_mode if cfg.portfolio_allocation_mode is not None else "equal"
     return config
 
 
@@ -83,7 +87,8 @@ def save_user_config(user_id: int, data: dict) -> dict:
                 "partial_tp1_pct", "partial_tp1_qty", "partial_tp2_pct", "partial_tp2_qty",
                 "partial_tp3_pct", "partial_tp3_qty",
                 "enable_trailing", "enable_time_exit", "enable_partial_tp",
-                "max_daily_loss_pct", "max_total_loss_pct"]:
+                "max_daily_loss_pct", "max_total_loss_pct",
+                "sentiment_enabled", "portfolio_allocation_mode"]:
         if key in data:
             safe[key] = data[key]
     if safe:
