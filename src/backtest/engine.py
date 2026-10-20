@@ -179,9 +179,42 @@ class BacktestEngine:
         if position == "LONG":
             close_pos(float(df["close"].iloc[-1]), df["timestamp"].iloc[-1], "end")
 
-        return self._compute_metrics(trades, equity_curve, symbol)
+        return self._compute_metrics(trades, equity_curve, symbol, df["close"])
 
-    def _compute_metrics(self, trades, equity_curve, symbol):
+    def _buy_and_hold_equity(self, closes) -> np.ndarray:
+        """Equity de comprar-y-mantener con comisión+slippage de entrada y salida.
+
+        Compra todo el balance en la primera vela y liquida en la última, aplicando
+        el mismo slippage adverso y comisión que la estrategia, para que la
+        comparación sea justa.
+        """
+        closes = np.asarray(closes, dtype=float)
+        if closes.size == 0:
+            return np.array([self.initial_balance])
+        entry_fill = self._apply_slippage(float(closes[0]), "BUY")
+        fee = self.initial_balance * self.commission_pct
+        qty = (self.initial_balance - fee) / entry_fill
+        equity = qty * closes
+        exit_fill = self._apply_slippage(float(closes[-1]), "SELL")
+        exit_fee = exit_fill * qty * self.commission_pct
+        equity = equity.copy()
+        equity[-1] = exit_fill * qty - exit_fee
+        return equity
+
+    def _buy_and_hold_metrics(self, closes) -> dict:
+        """Métricas del benchmark buy & hold sobre el mismo tramo de precios."""
+        bh_equity = self._buy_and_hold_equity(closes)
+        bh_final = float(bh_equity[-1]) if len(bh_equity) else self.initial_balance
+        bh_return = (bh_final - self.initial_balance) / self.initial_balance * 100
+        bh_returns = np.diff(bh_equity) / bh_equity[:-1] if len(bh_equity) > 1 else np.array([0.0])
+        bh_returns = bh_returns[np.isfinite(bh_returns)]
+        return {
+            "buy_hold_return_pct": round(bh_return, 2),
+            "buy_hold_max_drawdown_pct": round(self._max_drawdown(bh_equity), 2),
+            "buy_hold_sharpe": round(self._sharpe(bh_returns), 3),
+        }
+
+    def _compute_metrics(self, trades, equity_curve, symbol, closes=None):
         exits = [t for t in trades if t["type"] == "EXIT"]
         wins = [t for t in exits if t["pnl_pct"] > 0]
         losses = [t for t in exits if t["pnl_pct"] <= 0]
@@ -202,6 +235,10 @@ class BacktestEngine:
 
         calmar = (total_return_pct / max_dd) if max_dd > 0 else 0.0
 
+        bh = self._buy_and_hold_metrics(closes)
+        excess_return_pct = total_return_pct - bh["buy_hold_return_pct"]
+        beats_buy_hold = total_return_pct > bh["buy_hold_return_pct"]
+
         return {
             "symbol": symbol,
             "initial_balance": self.initial_balance,
@@ -219,6 +256,11 @@ class BacktestEngine:
             "sortino_ratio": round(sortino, 3),
             "max_drawdown_pct": round(max_dd, 2),
             "calmar_ratio": round(calmar, 3),
+            "buy_hold_return_pct": bh["buy_hold_return_pct"],
+            "buy_hold_max_drawdown_pct": bh["buy_hold_max_drawdown_pct"],
+            "buy_hold_sharpe": bh["buy_hold_sharpe"],
+            "excess_return_pct": round(excess_return_pct, 2),
+            "beats_buy_hold": bool(beats_buy_hold),
             "commission_pct": self.commission_pct,
             "slippage_pct": self.slippage_pct,
             "equity_curve": [round(float(e), 2) for e in equity.tolist()],
@@ -287,6 +329,8 @@ def walk_forward_analysis(df: pd.DataFrame, engine_factory, n_splits: int = 4,
             "max_dd_pct": res.get("max_drawdown_pct", 0.0),
             "win_rate": res.get("win_rate", 0.0),
             "trades": res.get("exits", 0),
+            "buy_hold_return_pct": res.get("buy_hold_return_pct", 0.0),
+            "beats_buy_hold": res.get("beats_buy_hold", False),
         })
 
     if not results:
@@ -294,12 +338,18 @@ def walk_forward_analysis(df: pd.DataFrame, engine_factory, n_splits: int = 4,
 
     avg_return = np.mean([r["return_pct"] for r in results])
     avg_sharpe = np.mean([r["sharpe"] for r in results])
+    avg_bh_return = np.mean([r["buy_hold_return_pct"] for r in results])
     consistency = len([r for r in results if r["return_pct"] > 0]) / len(results) * 100
+    folds_beating_bh = len([r for r in results if r["beats_buy_hold"]])
 
     return {
         "symbol": symbol,
         "folds": results,
         "avg_return_pct": round(float(avg_return), 2),
+        "avg_buy_hold_return_pct": round(float(avg_bh_return), 2),
+        "excess_return_pct": round(float(avg_return - avg_bh_return), 2),
+        "beats_buy_hold": bool(avg_return > avg_bh_return),
+        "folds_beating_buy_hold": folds_beating_bh,
         "avg_sharpe": round(float(avg_sharpe), 3),
         "consistency_pct": round(consistency, 1),
         "n_splits": n_splits,
