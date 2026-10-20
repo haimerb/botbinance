@@ -31,8 +31,9 @@ from backend.services.metrics import (
 
 
 class BotRunner:
-    def __init__(self, mock_mode: bool = True):
+    def __init__(self, mock_mode: bool = True, dry_run: bool = False):
         self.mock_mode = mock_mode
+        self.dry_run = dry_run
         self.running = False
         self.thread = None
         self.user_id = None
@@ -41,6 +42,7 @@ class BotRunner:
         self.state = {
             "status": "stopped",
             "mock_mode": mock_mode,
+            "dry_run": dry_run,
             "symbols": list(DEFAULT_SYMBOLS),
             "current_prices": {},
             "positions": {},
@@ -531,7 +533,7 @@ class BotRunner:
                         atr_period=cfg.get("atr_period", 14),
                     )
 
-            executor = TradeExecutor(api_key=api_key, api_secret=api_secret)
+            executor = TradeExecutor(api_key=api_key, api_secret=api_secret, dry_run=self.dry_run)
             set_binance_connections(True, True)
             self._reconcile_with_exchange(data_client)
 

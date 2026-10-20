@@ -6,6 +6,7 @@ load_dotenv()
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
 USE_TESTNET = os.getenv("USE_TESTNET", "true").lower() == "true"
+DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 
 BINANCE_BASE_URL = "https://testnet.binance.vision" if USE_TESTNET else "https://api.binance.com"
 BINANCE_WS_URL = "wss://testnet.binance.vision/ws" if USE_TESTNET else "wss://stream.binance.com:9443/ws"
