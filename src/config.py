@@ -7,7 +7,7 @@ BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
 USE_TESTNET = os.getenv("USE_TESTNET", "true").lower() == "true"
 
-BINANCE_API_URL = "https://testnet.binance.vision/api" if USE_TESTNET else "https://api.binance.com/api"
+BINANCE_BASE_URL = "https://testnet.binance.vision" if USE_TESTNET else "https://api.binance.com"
 BINANCE_WS_URL = "wss://testnet.binance.vision/ws" if USE_TESTNET else "wss://stream.binance.com:9443/ws"
 
 DEFAULT_SYMBOLS = ["BTCUSDT"]
