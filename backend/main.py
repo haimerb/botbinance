@@ -36,6 +36,32 @@ app.add_middleware(
 
 add_security_headers(app)
 
+
+@app.get("/health")
+def health_check():
+    from sqlalchemy import text
+    from backend.database import engine
+    checks = {"api": "ok"}
+    status_code = 200
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception:
+        checks["database"] = "error"
+        status_code = 503
+    try:
+        import redis
+        r = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), socket_connect_timeout=2)
+        r.ping()
+        checks["redis"] = "ok"
+    except Exception:
+        checks["redis"] = "unavailable"
+    if status_code != 200:
+        raise HTTPException(status_code=status_code, detail=checks)
+    return checks
+
+
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
