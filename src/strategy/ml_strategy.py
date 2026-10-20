@@ -22,6 +22,7 @@ class MLStrategy:
         self.model_path = model_path
         self.confidence_threshold = confidence_threshold
         self.high_confidence = high_confidence
+        self.metrics = {}
         self._feature_cache = {}
         self._load_model()
 
@@ -48,6 +49,7 @@ class MLStrategy:
             if isinstance(data, dict):
                 self.dir_model = data.get("dir_model")
                 self.vol_pipeline = data.get("vol_pipeline")
+                self.metrics = data.get("metrics", {}) or {}
             print("Modelos ML cargados.")
         except FileNotFoundError:
             print("Modelo ML no encontrado. Ejecuta train_model.py")
@@ -55,6 +57,20 @@ class MLStrategy:
             print(f"ERROR DE INTEGRIDAD DEL MODELO: {e}")
             self.dir_model = None
             self.vol_pipeline = None
+
+    def has_model(self) -> bool:
+        return self.dir_model is not None
+
+    def get_metrics(self) -> dict:
+        """Métricas reales del modelo cargado; incluye None si no hay modelo."""
+        return {
+            "model_loaded": self.has_model(),
+            "model_accuracy": self.metrics.get("dir_accuracy") if self.has_model() else None,
+            "up_recall": self.metrics.get("up_recall"),
+            "up_precision": self.metrics.get("up_precision"),
+            "vol_accuracy": self.metrics.get("vol_accuracy"),
+            "trained_at": self.metrics.get("trained_at"),
+        }
 
     def _prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
         df_hash = hashlib.md5(pd.util.hash_pandas_object(df).values.tobytes()).hexdigest()

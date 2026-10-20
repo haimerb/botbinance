@@ -138,6 +138,8 @@ function Dashboard({ user, onLogout, onAccount }) {
 
   const winRate = stats && stats.exits > 0 ? ((stats.wins / stats.exits) * 100).toFixed(1) : '0.0'
 
+  const modelAccuracy = state?.model_loaded ? state?.model_accuracy ?? null : null
+
   return (
     <>
       <NotificationBanner notification={notification} onDismiss={() => setNotification(null)} />
@@ -273,6 +275,10 @@ function Dashboard({ user, onLogout, onAccount }) {
 
         <MetricCard title="Win Rate" value={`${winRate}%`}
           sub={`W: ${stats?.wins || 0} / L: ${stats?.losses || 0}`} trend={parseFloat(winRate) >= 50 ? 'up' : 'down'} />
+
+        <MetricCard title="Precisión IA" value={modelAccuracy != null ? `${(modelAccuracy * 100).toFixed(1)}%` : 'Sin modelo'}
+          sub={state?.model_loaded ? `Recall UP: ${state?.model_up_recall != null ? (state.model_up_recall * 100).toFixed(1) + '%' : '--'}` : 'Modelo ML no cargado'}
+          trend={modelAccuracy != null ? (modelAccuracy >= 0.5 ? 'up' : 'down') : ''} />
       </div>
 
       <div className="chart-section glass">

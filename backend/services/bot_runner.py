@@ -52,7 +52,8 @@ class BotRunner:
             "pnl": 0.0,
             "total_pnl": 0.0,
             "total_balance": 10000.0,
-            "model_accuracy": 38.78,
+            "model_accuracy": None,
+            "model_loaded": False,
             "last_update": None,
             "last_trade_id": 0,
             "daily_pnl": 0.0,
@@ -361,6 +362,21 @@ class BotRunner:
         )
         return rm
 
+    def _refresh_model_metrics(self):
+        """Expone en el estado las métricas reales del modelo ML activo."""
+        strategy = next(iter(self._ml_strategies.values()), None)
+        if strategy is None:
+            strategy = MLStrategy()
+            default_sym = self.state["symbols"][0] if self.state["symbols"] else "BTCUSDT"
+            self._ml_strategies.setdefault(default_sym, strategy)
+        metrics = strategy.get_metrics()
+        with self._lock:
+            self.state["model_loaded"] = metrics["model_loaded"]
+            self.state["model_accuracy"] = metrics["model_accuracy"]
+            self.state["model_up_recall"] = metrics.get("up_recall")
+            self.state["model_up_precision"] = metrics.get("up_precision")
+            self.state["model_trained_at"] = metrics.get("trained_at")
+
     def _round_qty_for(self, executor, symbol: str, qty: float) -> float:
         """Redondea la cantidad al stepSize del símbolo usando los filtros del executor."""
         try:
@@ -451,6 +467,7 @@ class BotRunner:
             self.state["circuit_breaker_triggered"] = False
         update_bot_status("running")
         set_binance_connections(True, True)
+        self._refresh_model_metrics()
         while self.running:
             with self._lock:
                 symbols = list(self.state["symbols"])
@@ -535,6 +552,7 @@ class BotRunner:
 
             executor = TradeExecutor(api_key=api_key, api_secret=api_secret, dry_run=self.dry_run)
             set_binance_connections(True, True)
+            self._refresh_model_metrics()
             self._reconcile_with_exchange(data_client)
 
             with self._lock:
