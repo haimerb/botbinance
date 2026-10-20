@@ -9,7 +9,7 @@ from backend.core.config import MOCK_MODE, ALLOWED_ORIGINS, limiter
 from backend.core.security_headers import add_security_headers
 from backend.services.database import init_db
 from backend.services.metrics import HTTP_REQUESTS_TOTAL, HTTP_REQUEST_DURATION
-from backend.api import auth, mfa, bot, trades, market, user, alerts, ws, health
+from backend.api import auth, mfa, bot, trades, market, user, alerts, ws, health, backtest
 
 init_db()
 
@@ -56,6 +56,7 @@ app.include_router(mfa.router)
 app.include_router(bot.router)
 app.include_router(trades.router)
 app.include_router(market.router)
+app.include_router(backtest.router)
 app.include_router(user.router)
 app.include_router(alerts.router)
 app.include_router(ws.router)

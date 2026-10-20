@@ -21,6 +21,18 @@ def _client_meta(request: Request) -> dict:
     }
 
 
+def _security_alert(event_type: str, detail: str, request: Request):
+    try:
+        from backend.services.notifications import notify_security_alert
+        notify_security_alert(
+            event_type,
+            detail,
+            request.client.host if request.client else None,
+        )
+    except Exception:
+        pass
+
+
 @router.post("/setup")
 @limiter.limit("3/minute")
 def mfa_setup(request: Request, current_user: dict = Depends(get_current_user)):
@@ -131,6 +143,8 @@ def mfa_disable(
         event_data="",
         **_client_meta(request),
     )
+
+    _security_alert("mfa_disabled", f"user_id={user.id}", request)
 
     return {"status": "ok", "message": "MFA deshabilitado correctamente"}
 

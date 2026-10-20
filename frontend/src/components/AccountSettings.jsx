@@ -23,6 +23,7 @@ const TOOLTIPS = {
   ma_slow_period: 'Período de la media móvil lenta. Valores mayores filtran más ruido del mercado.',
   ml_confidence: 'Confianza mínima que debe tener el modelo ML para generar una señal. Mayor = menos señales pero más selectivas.',
   balance_allocation: 'Porcentaje del balance total que el bot puede usar para operar. El resto se mantiene como reserva.',
+  portfolio_allocation_mode: 'Cómo reparte el capital entre tus símbolos: igual, por volatilidad, por confianza del modelo ML o inverso a la volatilidad.',
   trailing_stop_pct: 'Distancia porcentual del trailing stop. El stop se mueve detrás del precio cuando la ganancia supera la activación.',
   trailing_activation_pct: 'Ganancia mínima para activar el trailing stop. El trailing solo empieza tras superar esta ganancia.',
   time_exit_hours: 'Horas máximas que una posición puede permanecer abierta antes de cerrarse automáticamente (0 = desactivado).',
@@ -85,6 +86,7 @@ export default function AccountSettings({ user, onBack }) {
         ma_slow_period: parseInt(form.ma_slow_period.value),
         ml_confidence_threshold: parseFloat(form.ml_confidence.value) / 100,
         balance_allocation_pct: parseFloat(form.balance_allocation.value),
+        portfolio_allocation_mode: form.portfolio_allocation_mode.value,
         ai_stop_loss_enabled: form.ai_stop_loss ? form.ai_stop_loss.checked : false,
         trailing_stop_pct: parseFloat(form.trailing_stop_pct.value) / 100,
         trailing_activation_pct: parseFloat(form.trailing_activation_pct.value) / 100,
@@ -361,7 +363,16 @@ export default function AccountSettings({ user, onBack }) {
                   <label><LabelWithTooltip label="Balance Asignado (%)" tooltip={TOOLTIPS.balance_allocation} /></label>
                   <input type="number" name="balance_allocation" step="5" min="1" max="100"
                     defaultValue={config.balance_allocation_pct} required />
-</div>
+                </div>
+                <div className="field">
+                  <label><LabelWithTooltip label="Reparto entre Símbolos" tooltip={TOOLTIPS.portfolio_allocation_mode} /></label>
+                  <select name="portfolio_allocation_mode" defaultValue={config.portfolio_allocation_mode || 'equal'}>
+                    <option value="equal">Igual (equitativo)</option>
+                    <option value="inverse_vol">Inverso a la volatilidad</option>
+                    <option value="volatility">Por volatilidad</option>
+                    <option value="confidence">Por confianza ML</option>
+                  </select>
+                </div>
               <div className="field">
                 <label>
                   <LabelWithTooltip label="Stop Loss Inteligente (IA)" tooltip="Usa la volatilidad del mercado para ajustar dinámicamente el stop-loss y take-profit. Recomendado para mercados volátiles." />

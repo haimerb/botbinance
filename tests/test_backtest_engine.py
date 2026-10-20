@@ -85,3 +85,40 @@ def test_elapsed_hours_helper():
     assert BacktestEngine._elapsed_hours("2024-01-01 00:00:00", "2024-01-01 06:00:00") == 6.0
     assert BacktestEngine._elapsed_hours(None, "2024-01-01") is None
     assert BacktestEngine._elapsed_hours("no-fecha", "2024-01-01") is None
+
+
+def make_ohlcv_df(n=300, seed=1):
+    rng = np.random.default_rng(seed)
+    close = 100 + np.cumsum(rng.standard_normal(n))
+    return pd.DataFrame({
+        "timestamp": pd.date_range("2024-01-01", periods=n, freq="h"),
+        "open": close,
+        "high": close + 1,
+        "low": close - 1,
+        "close": close,
+        "volume": rng.random(n) * 1000,
+    })
+
+
+def test_generate_signals_adds_signal_column():
+    df = make_ohlcv_df()
+    engine = BacktestEngine()
+    out = engine.generate_signals(df)
+    assert "signal" in out.columns
+    assert set(out["signal"].unique()).issubset({"BUY", "SELL", "HOLD"})
+    assert len(out) == len(df)
+
+
+def test_run_generates_signals_when_missing():
+    df = make_ohlcv_df()
+    engine = BacktestEngine({"trade_quantity": 0.5})
+    result = engine.run(df, symbol="TESTUSDT")
+    assert "error" not in result
+    assert "total_trades" in result
+
+
+def test_generate_signals_with_custom_fn():
+    df = make_ohlcv_df()
+    engine = BacktestEngine()
+    out = engine.generate_signals(df, signal_fn=lambda d: ["BUY"] * len(d))
+    assert (out["signal"] == "BUY").all()

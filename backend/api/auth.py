@@ -39,6 +39,18 @@ def _client_meta(request: Request) -> dict:
     }
 
 
+def _security_alert(event_type: str, detail: str, request: Request):
+    try:
+        from backend.services.notifications import notify_security_alert
+        notify_security_alert(
+            event_type,
+            detail,
+            request.client.host if request.client else None,
+        )
+    except Exception:
+        pass
+
+
 def validate_password_complexity(password: str) -> str | None:
     if len(password) < 12:
         return "Contraseña debe tener al menos 12 caracteres"
@@ -199,6 +211,7 @@ def save_binance_keys(
             event_data="binance_keys_changed",
             **meta,
         )
+        _security_alert("api_keys_updated", f"user_id={current_user['sub']}", request)
         return {"status": "ok", "can_trade": can_trade}
     except BinanceAPIException as e:
         log_audit(
