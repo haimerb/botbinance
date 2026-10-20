@@ -213,7 +213,13 @@ def train_direction_model(X_train, y_train, X_test, y_test):
     print(f"TN={tn} FP={fp} FN={fn} TP={tp}")
     print(f"UP recall: {tp/(tp+fn):.1%} | UP precision: {tp/(tp+fp):.1%}")
 
-    return best
+    metrics = {
+        "dir_accuracy": round(float(acc), 4),
+        "up_recall": round(float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0, 4),
+        "up_precision": round(float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0, 4),
+        "test_samples": len(y_test),
+    }
+    return best, metrics
 
 
 def train_volatility_model(X_train, y_train, X_test, y_test):
@@ -232,7 +238,7 @@ def train_volatility_model(X_train, y_train, X_test, y_test):
     acc = accuracy_score(y_test, y_pred)
     print(f"RF Test: {acc:.2%}")
     print(classification_report(y_test, y_pred, target_names=["LOW", "HIGH"]))
-    return pipeline
+    return pipeline, {"vol_accuracy": round(float(acc), 4), "vol_test_samples": len(y_test)}
 
 
 def fetch_multi_symbol_data(symbols=None, interval=None, limit=5000):
@@ -301,8 +307,15 @@ def train_model(symbols=None, interval=None, limit=5000):
 
     print(f"\nTrain: {len(X_train)} | Test: {len(X_test)}")
 
-    dir_model = train_direction_model(X_train, y_dir_train, X_test, y_dir_test)
-    vol_pipeline = train_volatility_model(X_train, y_vol_train, X_test, y_vol_test)
+    dir_model, dir_metrics = train_direction_model(X_train, y_dir_train, X_test, y_dir_test)
+    vol_pipeline, vol_metrics = train_volatility_model(X_train, y_vol_train, X_test, y_vol_test)
+
+    metrics = {
+        **dir_metrics,
+        **vol_metrics,
+        "n_samples": int(len(df)),
+        "trained_at": pd.Timestamp.utcnow().isoformat(),
+    }
 
     joblib.dump({
         "dir_model": dir_model,
@@ -310,18 +323,8 @@ def train_model(symbols=None, interval=None, limit=5000):
         "features": FEATURE_COLS,
         "symbols": symbols,
         "interval": interval or INTERVAL,
+        "metrics": metrics,
     }, MODEL_PATH)
     print(f"\nModelos guardados en {MODEL_PATH}")
-
-
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="Entrenar modelo ML para binance bot")
-    parser.add_argument("--symbols", nargs="+", default=DEFAULT_SYMBOLS,
-                        help="Símbolos para entrenar (ej: BTCUSDT ETHUSDT)")
-    parser.add_argument("--interval", default=INTERVAL,
-                        help="Intervalo de velas (ej: 1h, 4h, 1d)")
-    parser.add_argument("--limit", type=int, default=5000,
-                        help="Límite de velas por símbolo")
-    args = parser.parse_args()
-    train_model(symbols=args.symbols, interval=args.interval, limit=args.limit)
+    print(f"Métricas: acc={metrics.get('dir_accuracy'):.2%} | up_recall={metrics.get('up_recall'):.2%}")
+    return metrics
