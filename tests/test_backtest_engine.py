@@ -63,3 +63,25 @@ def test_walk_forward_produces_folds():
     assert len(result["folds"]) >= 2
     assert "avg_return_pct" in result
     assert "consistency_pct" in result
+
+
+def test_time_exit_closes_position():
+    df = make_df(n=48, trend=0.0)
+    engine = BacktestEngine({
+        "trade_quantity": 1.0,
+        "commission_pct": 0.0,
+        "slippage_pct": 0.0,
+        "time_exit_hours": 5,
+        "enable_trailing": False,
+        "stop_loss_pct": 0.5,
+        "take_profit_pct": 0.5,
+    })
+    result = engine.run(df, symbol="BTCUSDT")
+    assert "error" not in result
+    assert result["exits"] > 0
+
+
+def test_elapsed_hours_helper():
+    assert BacktestEngine._elapsed_hours("2024-01-01 00:00:00", "2024-01-01 06:00:00") == 6.0
+    assert BacktestEngine._elapsed_hours(None, "2024-01-01") is None
+    assert BacktestEngine._elapsed_hours("no-fecha", "2024-01-01") is None
