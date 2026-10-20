@@ -11,18 +11,19 @@ router = APIRouter(prefix="/api", tags=["bot"])
 
 @router.get("/status")
 def get_status(current_user: dict = Depends(get_current_user)):
-    bot.set_user(current_user["sub"])
+    bot.ensure_user(current_user["sub"])
     return bot.get_state()
 
 
 @router.post("/start")
 def start_bot(request: Request, current_user: dict = Depends(get_current_user)):
     user = get_user_by_id_with_keys(current_user["sub"])
-    bot.set_user(current_user["sub"])
+    bot.ensure_user(current_user["sub"])
     if not MOCK_MODE and (not user.binance_api_key or not user.binance_api_secret):
         raise HTTPException(
             status_code=400, detail="Configura tus API keys de Binance primero"
         )
+    bot.prepare_for_start()
     bot.start()
     update_bot_status("running")
     log_audit(
@@ -37,7 +38,7 @@ def start_bot(request: Request, current_user: dict = Depends(get_current_user)):
 
 @router.post("/stop")
 def stop_bot(request: Request, current_user: dict = Depends(get_current_user)):
-    bot.set_user(current_user["sub"])
+    bot.ensure_user(current_user["sub"])
     bot.stop()
     update_bot_status("stopped")
     log_audit(
@@ -52,7 +53,7 @@ def stop_bot(request: Request, current_user: dict = Depends(get_current_user)):
 
 @router.get("/config/suggest")
 def suggest_config(current_user: dict = Depends(get_current_user)):
-    bot.set_user(current_user["sub"])
+    bot.ensure_user(current_user["sub"])
     state = bot.get_state()
     prices = state.get("current_prices", {})
     suggestions = {}

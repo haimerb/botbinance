@@ -21,7 +21,7 @@ async def websocket_endpoint(ws: WebSocket):
         await ws.close(code=4001, reason="Token inválido")
         return
 
-    bot.set_user(current_user["sub"])
+    bot.ensure_user(current_user["sub"])
     await ws.accept()
     update_ws_connections(1)
     try:

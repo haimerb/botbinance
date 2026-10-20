@@ -70,37 +70,78 @@ class BotRunner:
         self._price_history = {}
 
     def set_user(self, user_id: int):
+        """Cambia de usuario y recarga la config.
+
+        No destruye el estado si el bot está corriendo con el mismo usuario;
+        en ese caso solo recarga la config de forma segura.
+        """
         with self._lock:
+            same_user = self.user_id == user_id
             self.user_id = user_id
-            if user_id:
-                self.config = load_user_config(user_id)
+            if not user_id:
+                update_bot_status("stopped")
+                return
+
+            self.config = load_user_config(user_id)
+
+            if same_user and self.running:
+                # Solo refrescar configuración; preservar posiciones y gestores.
                 self.state["symbols"] = list(self.config.get("symbols", DEFAULT_SYMBOLS))
-                alloc_pct = self.config.get("balance_allocation_pct", BALANCE_ALLOCATION_PCT)
-                total_balance = 10000.0
-                self.state["total_balance"] = total_balance
-                self.state["balance"] = total_balance * (alloc_pct / 100.0)
-                self.state["initial_balance"] = self.state["balance"]
-                self.state["max_daily_loss_pct"] = self.config.get("max_daily_loss_pct", 5.0)
-                self.state["max_total_loss_pct"] = self.config.get("max_total_loss_pct", 10.0)
-                symbols = self.state["symbols"]
-                for s in symbols:
-                    if s not in self.state["current_prices"]:
-                        self.state["current_prices"][s] = 0.0
-                        self.state["positions"][s] = None
-                        self.state["signals"][s] = {"ma": "HOLD", "ml": "HOLD", "enhanced": "HOLD", "consensus": "HOLD"}
-                        self.state["strategy_details"][s] = {}
-                        self.mock_prices[s] = 65000.0 if "BTC" in s else 3500.0 if "ETH" in s else 150.0
-                        self.mock_phases[s] = random.random() * 6.28
-                self._risk_managers.clear()
-                self._enhanced_strategies.clear()
-                self._ma_strategies.clear()
-                self._ml_strategies.clear()
-                from src.risk.portfolio_manager import PortfolioManager
                 mode = self.config.get("portfolio_allocation_mode", "equal")
-                self._portfolio_manager = PortfolioManager(mode=mode)
-                self._symbol_weights = {}
-                self._price_history = {}
+                if self._portfolio_manager is not None:
+                    self._portfolio_manager.mode = mode
+                return
+
+            self._reset_state_for_user()
+
         update_bot_status("stopped")
+
+    def ensure_user(self, user_id: int):
+        """Asocia el usuario sin destrozar el estado si ya es el activo.
+
+        Pensado para endpoints de solo lectura (/status) y el WebSocket.
+        """
+        with self._lock:
+            if user_id and self.user_id == user_id and self.config:
+                return
+        self.set_user(user_id)
+
+    def prepare_for_start(self):
+        """Reinicia el estado del usuario activo antes de arrancar el bot."""
+        with self._lock:
+            if not self.user_id:
+                return
+            self.config = load_user_config(self.user_id)
+            self._reset_state_for_user()
+
+    def _reset_state_for_user(self):
+        """Reinicia estado, gestores y PortfolioManager. Debe llamarse con el lock tomado."""
+        self.state["symbols"] = list(self.config.get("symbols", DEFAULT_SYMBOLS))
+        alloc_pct = self.config.get("balance_allocation_pct", BALANCE_ALLOCATION_PCT)
+        total_balance = 10000.0
+        self.state["total_balance"] = total_balance
+        self.state["balance"] = total_balance * (alloc_pct / 100.0)
+        self.state["initial_balance"] = self.state["balance"]
+        self.state["max_daily_loss_pct"] = self.config.get("max_daily_loss_pct", 5.0)
+        self.state["max_total_loss_pct"] = self.config.get("max_total_loss_pct", 10.0)
+        symbols = self.state["symbols"]
+        for s in symbols:
+            if s not in self.state["current_prices"]:
+                self.state["current_prices"][s] = 0.0
+                self.state["positions"][s] = None
+                self.state["signals"][s] = {"ma": "HOLD", "ml": "HOLD", "enhanced": "HOLD", "consensus": "HOLD"}
+                self.state["strategy_details"][s] = {}
+                self.mock_prices[s] = 65000.0 if "BTC" in s else 3500.0 if "ETH" in s else 150.0
+                self.mock_phases[s] = random.random() * 6.28
+        self._risk_managers.clear()
+        self._enhanced_strategies.clear()
+        self._ma_strategies.clear()
+        self._ml_strategies.clear()
+        from src.risk.portfolio_manager import PortfolioManager
+        mode = self.config.get("portfolio_allocation_mode", "equal")
+        self._portfolio_manager = PortfolioManager(mode=mode)
+        self._symbol_weights = {}
+        self._price_history = {}
 
     def _mock_tick(self, symbol: str) -> float:
         phase = self.mock_phases.get(symbol, 0.0)
