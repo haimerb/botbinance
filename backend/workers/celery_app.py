@@ -8,7 +8,7 @@ celery_app = Celery(
     "botbinance",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["backend.tasks"],
+    include=["backend.workers.tasks"],
 )
 
 celery_app.conf.update(
@@ -27,11 +27,11 @@ celery_app.conf.update(
 
 celery_app.conf.beat_schedule = {
     "cleanup-old-logs": {
-        "task": "backend.tasks.cleanup_old_logs",
+        "task": "backend.workers.tasks.cleanup_old_logs",
         "schedule": crontab(hour=3, minute=0),
     },
     "daily-portfolio-report": {
-        "task": "backend.tasks.send_daily_report",
+        "task": "backend.workers.tasks.send_daily_report",
         "schedule": crontab(hour=23, minute=55),
     },
 }

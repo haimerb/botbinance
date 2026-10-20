@@ -4,7 +4,7 @@ from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, Float, String, Text, DateTime, ForeignKey, func, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from backend.crypto import encrypt_value, decrypt_value
+from backend.services.crypto import encrypt_value, decrypt_value
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",

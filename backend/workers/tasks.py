@@ -1,13 +1,13 @@
 import os
 from datetime import datetime, timedelta
 
-from backend.celery_app import celery_app
+from backend.workers.celery_app import celery_app
 
 
-@celery_app.task(name="backend.tasks.cleanup_old_logs")
+@celery_app.task(name="backend.workers.tasks.cleanup_old_logs")
 def cleanup_old_logs():
     """Elimina logs de auditoría y errores más antiguos que la retención configurada."""
-    from backend.database import get_session, AuditLog, ErrorLog
+    from backend.services.database import get_session, AuditLog, ErrorLog
     from sqlalchemy import text
 
     retention_days = int(os.getenv("LOG_RETENTION_DAYS", "90"))
@@ -29,11 +29,11 @@ def cleanup_old_logs():
     }
 
 
-@celery_app.task(name="backend.tasks.send_daily_report")
+@celery_app.task(name="backend.workers.tasks.send_daily_report")
 def send_daily_report():
     """Envía reporte diario de P&L de todos los usuarios activos."""
-    from backend.database import get_session, User, Trade
-    from backend.notifications import notify_daily_report
+    from backend.services.database import get_session, User, Trade
+    from backend.services.notifications import notify_daily_report
     from sqlalchemy import func
 
     today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -56,11 +56,11 @@ def send_daily_report():
     return {"status": "ok", "reports_sent": reports_sent}
 
 
-@celery_app.task(name="backend.tasks.send_trade_notification", bind=True, max_retries=3)
+@celery_app.task(name="backend.workers.tasks.send_trade_notification", bind=True, max_retries=3)
 def send_trade_notification(self, user_email: str, symbol: str, side: str, price: float,
                             qty: float, pnl_pct: float = None):
     """Notifica la ejecución de un trade (async)."""
-    from backend.notifications import notify_trade
+    from backend.services.notifications import notify_trade
     try:
         notify_trade(user_email, symbol, side, price, qty, pnl_pct)
         return {"status": "ok"}
@@ -68,20 +68,20 @@ def send_trade_notification(self, user_email: str, symbol: str, side: str, price
         raise self.retry(exc=exc, countdown=10)
 
 
-@celery_app.task(name="backend.tasks.send_circuit_breaker_alert")
+@celery_app.task(name="backend.workers.tasks.send_circuit_breaker_alert")
 def send_circuit_breaker_alert(user_email: str, reason: str, loss_pct: float):
     """Notifica la activación de un circuit breaker."""
-    from backend.notifications import notify_circuit_breaker
+    from backend.services.notifications import notify_circuit_breaker
     notify_circuit_breaker(user_email, reason, loss_pct)
     return {"status": "ok"}
 
 
-@celery_app.task(name="backend.tasks.backtest_symbol")
+@celery_app.task(name="backend.workers.tasks.backtest_symbol")
 def backtest_symbol(user_id: int, symbol: str, interval: str, limit: int = 1000):
     """Ejecuta un backtest pesado en background."""
     from src.backtest.engine import BacktestEngine
     from src.data.binance_client import BinanceDataClient
-    from backend.user_config import load_user_config
+    from backend.services.user_config import load_user_config
 
     cfg = load_user_config(user_id)
     client = BinanceDataClient()
