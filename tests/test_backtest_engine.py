@@ -65,6 +65,45 @@ def test_walk_forward_produces_folds():
     assert "consistency_pct" in result
 
 
+def test_buy_and_hold_benchmark_present():
+    df = make_df(n=100, trend=0.001)
+    engine = BacktestEngine({"initial_balance": 10000.0, "trade_quantity": 1.0})
+    result = engine.run(df, symbol="BTCUSDT")
+    assert "buy_hold_return_pct" in result
+    assert "excess_return_pct" in result
+    assert "beats_buy_hold" in result
+    assert isinstance(result["beats_buy_hold"], bool)
+
+
+def test_buy_and_hold_positive_in_uptrend():
+    df = make_df(n=100, trend=0.001)
+    engine = BacktestEngine({"initial_balance": 10000.0, "trade_quantity": 1.0})
+    result = engine.run(df, symbol="BTCUSDT")
+    assert result["buy_hold_return_pct"] > 0
+    assert result["buy_hold_max_drawdown_pct"] >= 0
+
+
+def test_buy_and_hold_zero_flat_market():
+    df = make_df(n=50, trend=0.0)
+    engine = BacktestEngine({"initial_balance": 10000.0, "trade_quantity": 1.0})
+    result = engine.run(df, symbol="BTCUSDT")
+    assert result["buy_hold_return_pct"] <= 0
+
+
+def test_buy_and_hold_equity_applies_costs():
+    engine = BacktestEngine({"initial_balance": 10000.0, "commission_pct": 0.001, "slippage_pct": 0.0})
+    equity = engine._buy_and_hold_equity([100.0, 100.0, 100.0])
+    assert equity[-1] < 10000.0
+
+
+def test_walk_forward_reports_buy_hold():
+    df = make_df(n=200)
+    result = walk_forward_analysis(df, lambda: BacktestEngine({"trade_quantity": 1.0}), n_splits=4)
+    assert "avg_buy_hold_return_pct" in result
+    assert "beats_buy_hold" in result
+    assert "folds_beating_buy_hold" in result
+
+
 def test_time_exit_closes_position():
     df = make_df(n=48, trend=0.0)
     engine = BacktestEngine({
