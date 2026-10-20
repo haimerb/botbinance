@@ -3,6 +3,7 @@ from typing import Optional
 
 from binance.spot import Spot
 from src.config import BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_BASE_URL
+from src.execution.exchange_filters import ExchangeFilters
 
 
 @dataclass
@@ -28,16 +29,27 @@ class TradeExecutor:
         secret = api_secret if api_secret is not None else BINANCE_API_SECRET
         self.client = Spot(api_key=key, api_secret=secret, base_url=BINANCE_BASE_URL)
         self.last_order = None
+        self.filters = ExchangeFilters()
 
     def execute_order(
         self, side: str, quantity: float, symbol: str = "BTCUSDT", order_type="MARKET"
     ) -> OrderResult:
+        qty = quantity
+        if order_type == "MARKET":
+            ref_price = self.get_symbol_price(symbol)
+            qty, _price, error = self.filters.normalize_order(
+                self.client, symbol, quantity, ref_price
+            )
+            if error:
+                print(f"Orden rechazada localmente ({symbol} {side}): {error}")
+                return OrderResult.failure(side, symbol, quantity, error)
+
         try:
             order = self.client.new_order(
                 symbol=symbol,
                 side=side,
                 type=order_type,
-                quantity=quantity
+                quantity=qty
             )
             self.last_order = order
             filled_qty = float(order.get("executedQty", 0) or 0)
@@ -47,7 +59,7 @@ class TradeExecutor:
                 ok=True,
                 side=side,
                 symbol=symbol,
-                quantity=quantity,
+                quantity=qty,
                 order_id=order.get("orderId"),
                 status=order.get("status"),
                 filled_qty=filled_qty,
