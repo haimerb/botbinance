@@ -9,9 +9,8 @@ from typing import Optional
 
 from src.config import DEFAULT_SYMBOLS, INTERVAL, TRADE_QUANTITY, BALANCE_ALLOCATION_PCT
 from src.data.binance_client import BinanceDataClient
-from src.strategy.ma_crossover import MACrossoverStrategy
 from src.strategy.ml_strategy import MLStrategy
-from src.strategy.enhanced_strategy import EnhancedStrategy, MACrossoverEnhanced, SignalResult
+from src.strategy.enhanced_strategy import EnhancedStrategy, MACrossoverEnhanced
 from src.strategy.sentiment import get_analyzer
 from src.execution.trade_executor import TradeExecutor
 from src.risk.risk_manager import RiskManager, ExitReason

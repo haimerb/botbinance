@@ -35,6 +35,19 @@ class BacktestEngine:
     def _commission(self, price: float, qty: float) -> float:
         return price * qty * self.commission_pct
 
+    @staticmethod
+    def _elapsed_hours(entry_ts, current_ts):
+        """Horas transcurridas entre dos timestamps; None si no se pueden parsear."""
+        if entry_ts is None or current_ts is None:
+            return None
+        try:
+            start = pd.to_datetime(entry_ts)
+            end = pd.to_datetime(current_ts)
+            delta = (end - start).total_seconds() / 3600.0
+            return max(delta, 0.0)
+        except Exception:
+            return None
+
     def run(self, df: pd.DataFrame, symbol: str = "BTCUSDT",
             signal_col: str = "signal", verbose: bool = False) -> dict:
         """Ejecuta el backtest sobre un DataFrame con columna de señales.
@@ -72,7 +85,7 @@ class BacktestEngine:
             return True
 
         def close_pos(price, ts, reason):
-            nonlocal balance, position, entry_price, qty, highest, trailing_stop
+            nonlocal balance, position, entry_price, qty, highest, trailing_stop, entry_ts
             if position is None:
                 return
             fill = self._apply_slippage(price, "SELL")
@@ -87,6 +100,7 @@ class BacktestEngine:
             position = None
             entry_price = 0.0
             qty = 0.0
+            entry_ts = None
 
         for _, row in df.iterrows():
             price = float(row["close"])
@@ -95,6 +109,7 @@ class BacktestEngine:
 
             if position == "LONG":
                 highest = max(highest, price)
+                elapsed_hours = self._elapsed_hours(entry_ts, ts)
                 # Trailing stop
                 if self.enable_trailing and highest >= entry_price * (1 + self.trailing_activation_pct):
                     new_stop = highest * (1 - self.trailing_stop_pct)
@@ -108,6 +123,10 @@ class BacktestEngine:
                 # Trailing
                 elif trailing_stop and price <= trailing_stop:
                     close_pos(price, ts, "trailing_stop")
+                # Time exit
+                elif (self.enable_time_exit and self.time_exit_hours
+                      and elapsed_hours is not None and elapsed_hours >= self.time_exit_hours):
+                    close_pos(price, ts, "time_exit")
                 # Señal de venta
                 elif signal == "SELL":
                     close_pos(price, ts, "signal")
