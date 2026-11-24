@@ -138,7 +138,7 @@ def _build_base_estimators():
         ("xgb", xgb.XGBClassifier(
             objective="binary:logistic", eval_metric="logloss",
             random_state=42, n_jobs=-1, max_delta_step=1,
-            early_stopping_rounds=50,
+            n_estimators=300,
         )),
     ]
     if HAS_LGBM:
@@ -162,7 +162,7 @@ def _make_stacking() -> StackingClassifier:
     )
 
 
-def train_direction_model(X_train, y_train, X_test, y_test):
+def train_direction_model(X_train, y_train, X_test, y_test, n_iter=8):
     print("\n--- Modelo de DIRECCIÓN (Stacking Ensemble) ---")
 
     pipeline = ImbPipeline([
@@ -189,7 +189,7 @@ def train_direction_model(X_train, y_train, X_test, y_test):
 
     tscv = TimeSeriesSplit(n_splits=3)
     search = RandomizedSearchCV(
-        pipeline, param_grid, n_iter=8, cv=tscv,
+        pipeline, param_grid, n_iter=n_iter, cv=tscv,
         scoring="accuracy", random_state=42, n_jobs=-1, verbose=0,
     )
 
