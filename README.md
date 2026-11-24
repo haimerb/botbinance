@@ -284,11 +284,12 @@ pnpm run electron:build    # genera el instalador en frontend/release/
 El bot usa `src/models/trained_model.pkl` (incluido en el repo). Para reentrenarlo:
 
 ```bash
-# requisitos extras no incluidos en requirements.txt
-pip install xgboost imbalanced-learn
-
+# las dependencias ML (xgboost, lightgbm, catboost, imbalanced-learn)
+# ya están incluidas en requirements.txt
 python train_model.py --symbols BTCUSDT ETHUSDT --interval 1h --limit 5000
 ```
+
+Las velas se **paginan automáticamente** (la API de Binance entrega máx. 1000 por request), así que `--limit 5000` descarga 5000 velas reales. En máquinas con poca RAM ajusta el paralelismo con `ML_NJOBS` (default `-1` = todos los cores), p. ej. `ML_NJOBS=2 python train_model.py ...`.
 
 El entrenamiento: descarga velas históricas → calcula ~30 features técnicas → entrena un **ensemble de stacking** (XGBoost/LightGBM/CatBoost + LogisticRegression) para dirección y un RandomForest para volatilidad, con `SMOTE` y validación `TimeSeriesSplit`. Guarda ambos modelos en `src/models/trained_model.pkl`.
 
@@ -302,7 +303,7 @@ El entrenamiento: descarga velas históricas → calcula ~30 features técnicas 
 python -m pytest tests/ -q
 ```
 
-34 tests que cubren `src/strategy/ma_crossover.py`, `src/risk/risk_manager.py`, `src/backtest/engine.py`, `src/risk/portfolio_manager.py` y `src/strategy/sentiment.py`.
+73 tests que cubren `src/strategy/ma_crossover.py`, `src/risk/risk_manager.py`, `src/backtest/engine.py`, `src/risk/portfolio_manager.py`, `src/strategy/sentiment.py`, `src/models/trainer.py` y `src/data/binance_client.py` (paginación de klines).
 
 ---
 
