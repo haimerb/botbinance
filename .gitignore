@@ -83,6 +83,7 @@ out/
 .env
 *.env
 bot.db
+catboost_info/
 
 # Instrucciones de trabajo locales (no versionar)
 AGENTS.md
