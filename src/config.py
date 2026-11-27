@@ -17,6 +17,7 @@ BINANCE_FUTURES_BASE_URL = (
 
 FUNDING_ENABLED = os.getenv("FUNDING_ENABLED", "false").lower() == "true"
 FUNDING_MIN_ANNUAL_PCT = float(os.getenv("FUNDING_MIN_ANNUAL_PCT", "8.0"))
+FUNDING_POLL_SECONDS = float(os.getenv("FUNDING_POLL_SECONDS", "300"))
 FUNDING_NOTIONAL_USDT = float(os.getenv("FUNDING_NOTIONAL_USDT", "100"))
 FUNDING_LEVERAGE = int(os.getenv("FUNDING_LEVERAGE", "1"))
 FUNDING_EXIT_IF_NEGATIVE = os.getenv("FUNDING_EXIT_IF_NEGATIVE", "true").lower() == "true"
