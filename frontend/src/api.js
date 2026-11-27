@@ -110,6 +110,10 @@ export function stopFunding() {
   return request('/funding/stop', { method: 'POST' })
 }
 
+export function getRecentAlerts() {
+  return request('/alerts/recent')
+}
+
 export function getKlines(symbol = 'BTCUSDT', interval = '1h', limit = 200) {
   return request(`/market/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`)
 }

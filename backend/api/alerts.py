@@ -1,23 +1,15 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Query
+
+from backend.core.config import alert_store
+from backend.core.deps import get_current_user
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
 
 @router.post("/webhook")
 async def alerts_webhook(payload: dict):
-    alerts = payload.get("alerts", [])
-    received = []
-    for a in alerts:
-        labels = a.get("labels", {})
-        annotations = a.get("annotations", {})
-        entry = {
-            "status": a.get("status"),
-            "alertname": labels.get("alertname"),
-            "severity": labels.get("severity"),
-            "summary": annotations.get("summary"),
-            "description": annotations.get("description"),
-        }
-        received.append(entry)
+    received = alert_store.add(payload)
+    for entry in received:
         try:
             from backend.services.notifications import notify_risk_alert
 
@@ -27,4 +19,12 @@ async def alerts_webhook(payload: dict):
             )
         except Exception:
             pass
-    return {"received": len(alerts), "alerts": received}
+    return {"received": len(received), "alerts": received}
+
+
+@router.get("/recent")
+def recent_alerts(
+    current_user: dict = Depends(get_current_user),
+    limit: int = Query(50, ge=1, le=100),
+):
+    return {"alerts": alert_store.list(limit)}

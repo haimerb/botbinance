@@ -7,6 +7,7 @@ import TradingViewChart from './TradingViewChart'
 import NotificationBanner from './NotificationBanner'
 import TradeTable from './TradeTable'
 import FundingPanel from './FundingPanel'
+import AlertsPanel from './AlertsPanel'
 
 function Dashboard({ user, onLogout, onAccount }) {
   const [state, setState] = useState(null)
@@ -23,6 +24,7 @@ function Dashboard({ user, onLogout, onAccount }) {
   const [notification, setNotification] = useState(null)
   const [funding, setFunding] = useState(null)
   const [fundingError, setFundingError] = useState('')
+  const [alerts, setAlerts] = useState([])
   const lastTradeIdRef = useRef(0)
   const priceHistoryRef = useRef({})
   const notifTimeoutRef = useRef(null)
@@ -45,6 +47,7 @@ function Dashboard({ user, onLogout, onAccount }) {
       setPriceHistory({ ...hist })
     }
     if (data?.funding) setFunding(data.funding)
+    if (data?.alerts) setAlerts(data.alerts)
   }, [])
 
   const fetchTradesAndStats = useCallback(async () => {
@@ -84,16 +87,25 @@ function Dashboard({ user, onLogout, onAccount }) {
     } catch (e) { setFundingError(e.message) }
   }, [])
 
+  const fetchAlerts = useCallback(async () => {
+    try {
+      const data = await api.getRecentAlerts()
+      setAlerts(data.alerts || [])
+    } catch (e) { console.error('Error fetching alerts:', e) }
+  }, [])
+
   useEffect(() => {
     api.connectWs(handleWsUpdate)
     fetchTradesAndStats()
     fetchFunding()
+    fetchAlerts()
     const interval = setInterval(() => {
       fetchTradesAndStats()
       fetchFunding()
+      fetchAlerts()
     }, 5000)
     return () => { api.disconnectWs(handleWsUpdate); clearInterval(interval) }
-  }, [handleWsUpdate, fetchTradesAndStats, fetchFunding])
+  }, [handleWsUpdate, fetchTradesAndStats, fetchFunding, fetchAlerts])
 
   useEffect(() => {
     if (state?.symbols?.length && activeSymbol && !state.symbols.includes(activeSymbol)) {
@@ -387,6 +399,8 @@ function Dashboard({ user, onLogout, onAccount }) {
         onStart={handleFundingStart}
         onStop={handleFundingStop}
       />
+
+      <AlertsPanel alerts={alerts} />
 
       <div className="section glass">
         <div className="section-header">

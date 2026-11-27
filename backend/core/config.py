@@ -2,6 +2,7 @@ import os
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
+from backend.services.alert_store import AlertStore
 from backend.services.bot_runner import BotRunner
 from backend.services.funding_runner import FundingRunner
 
@@ -17,3 +18,4 @@ limiter = Limiter(key_func=get_remote_address)
 
 bot = BotRunner(mock_mode=MOCK_MODE, dry_run=DRY_RUN)
 funding_runner = FundingRunner(dry_run=DRY_RUN)
+alert_store = AlertStore()

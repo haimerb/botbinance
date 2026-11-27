@@ -2,7 +2,7 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
-from backend.core.config import bot
+from backend.core.config import alert_store, bot
 from backend.services.auth import decode_token
 from backend.services.metrics import update_ws_connections, record_ws_message
 
@@ -27,6 +27,7 @@ async def websocket_endpoint(ws: WebSocket):
     try:
         while True:
             state = bot.get_state()
+            state["alerts"] = alert_store.list()
             await ws.send_json(state)
             record_ws_message()
             await asyncio.sleep(1)
