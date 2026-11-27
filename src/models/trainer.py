@@ -1,3 +1,4 @@
+import os
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 import pandas as pd
@@ -25,6 +26,11 @@ except ImportError:
 
 from src.config import MODEL_PATH, DEFAULT_SYMBOLS, INTERVAL
 from src.data.binance_client import BinanceDataClient
+
+
+# Paralelismo configurable: en máquinas con poca RAM, ML_NJOBS=2 evita el
+# thrashing de -1 (16 cores × ~166 MB por worker). Default -1 = todos los cores.
+N_JOBS = int(os.getenv("ML_NJOBS", "-1"))
 
 
 def add_technical_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -137,17 +143,18 @@ def _build_base_estimators():
     est = [
         ("xgb", xgb.XGBClassifier(
             objective="binary:logistic", eval_metric="logloss",
-            random_state=42, n_jobs=-1, max_delta_step=1,
+            random_state=42, n_jobs=N_JOBS, max_delta_step=1,
             n_estimators=300,
         )),
     ]
     if HAS_LGBM:
         est.append(("lgbm", lgb.LGBMClassifier(
-            objective="binary", random_state=42, n_jobs=-1, verbose=-1,
+            objective="binary", random_state=42, n_jobs=N_JOBS, verbose=-1,
         )))
     if HAS_CAT:
         est.append(("cat", CatBoostClassifier(
             loss_function="Logloss", random_seed=42, verbose=0,
+            thread_count=N_JOBS,
         )))
     return est
 
@@ -158,7 +165,7 @@ def _make_stacking() -> StackingClassifier:
         final_estimator=LogisticRegression(random_state=42, C=1.0, max_iter=1000),
         cv=3,
         stack_method="predict_proba",
-        n_jobs=-1,
+        n_jobs=N_JOBS,
     )
 
 
@@ -190,7 +197,7 @@ def train_direction_model(X_train, y_train, X_test, y_test, n_iter=8):
     tscv = TimeSeriesSplit(n_splits=3)
     search = RandomizedSearchCV(
         pipeline, param_grid, n_iter=n_iter, cv=tscv,
-        scoring="accuracy", random_state=42, n_jobs=-1, verbose=0,
+        scoring="accuracy", random_state=42, n_jobs=N_JOBS, verbose=0,
     )
 
     search.fit(X_train, y_train)
@@ -230,7 +237,7 @@ def train_volatility_model(X_train, y_train, X_test, y_test):
         ("scaler", StandardScaler()),
         ("rf", RandomForestClassifier(
             n_estimators=300, max_depth=10, min_samples_leaf=5,
-            class_weight="balanced", random_state=42, n_jobs=-1,
+            class_weight="balanced", random_state=42, n_jobs=N_JOBS,
         )),
     ])
     pipeline.fit(X_train, y_train)
@@ -272,6 +279,7 @@ def train_model(symbols=None, interval=None, limit=5000):
 
     print(f"\nSímbolos: {symbols}")
     print(f"Intervalo: {interval or INTERVAL}")
+    print(f"n_jobs: {N_JOBS} (env ML_NJOBS)")
 
     print("\nObteniendo datos históricos...")
     dfs = fetch_multi_symbol_data(symbols, interval, limit)
