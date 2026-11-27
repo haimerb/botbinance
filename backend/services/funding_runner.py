@@ -9,13 +9,18 @@ from src.config import (
     FUNDING_HISTORY_BASE_URL,
     FUNDING_HISTORY_WINDOW,
     FUNDING_LEVERAGE,
+    FUNDING_MAKER_FEE,
+    FUNDING_MAKER_PRICE_OFFSET,
+    FUNDING_MAKER_TIMEOUT_SECONDS,
     FUNDING_MAX_BASIS_PCT,
     FUNDING_MAX_ZSCORE,
     FUNDING_MIN_ANNUAL_PCT,
+    FUNDING_MIN_FALLBACK_ANNUAL_PCT,
     FUNDING_MIN_INTERVALS,
     FUNDING_NOTIONAL_USDT,
     FUNDING_SYMBOLS,
     FUNDING_TAKER_FEE,
+    FUNDING_USE_MAKER,
 )
 from src.data.binance_futures_client import BinanceFuturesClient
 from src.data.funding_history import FundingHistoryClient
@@ -68,6 +73,11 @@ class FundingRunner:
                 "basis": 0.0,
                 "fees": 0.0,
                 "net": 0.0,
+            },
+            "execution": {
+                "maker": FUNDING_USE_MAKER,
+                "maker_timeout": FUNDING_MAKER_TIMEOUT_SECONDS,
+                "maker_offset": FUNDING_MAKER_PRICE_OFFSET,
             },
         }
         self._executor = None
@@ -219,10 +229,16 @@ class FundingRunner:
         result = self._executor.open(
             best.symbol, quantity, best.funding_rate,
             mark_price=best.mark_price or 0,
+            maker=FUNDING_USE_MAKER,
+            maker_timeout=FUNDING_MAKER_TIMEOUT_SECONDS,
+            maker_offset=FUNDING_MAKER_PRICE_OFFSET,
+            min_fallback_annual_pct=FUNDING_MIN_FALLBACK_ANNUAL_PCT,
         )
         if result.ok and result.position is not None:
             basis_cost = max(best.basis_pct or 0, 0) / 100 * FUNDING_NOTIONAL_USDT
-            entry_fee = FUNDING_TAKER_FEE * FUNDING_NOTIONAL_USDT
+            entry_fee = (
+                FUNDING_MAKER_FEE if FUNDING_USE_MAKER else FUNDING_TAKER_FEE
+            ) * FUNDING_NOTIONAL_USDT
             with self._lock:
                 accounting = self.state["accounting"]
                 accounting["basis"] -= basis_cost

@@ -68,3 +68,24 @@ class BinanceFuturesClient:
         }
         params.update(kwargs)
         return self.client.new_order(**params)
+
+    def place_limit_order(self, symbol: str, side: str, quantity: float,
+                          price: float, *, post_only: bool = True,
+                          reduce_only: bool = False) -> dict:
+        params = {
+            "symbol": symbol,
+            "side": side,
+            "type": "LIMIT",
+            "timeInForce": "GTX" if post_only else "GTC",
+            "quantity": quantity,
+            "price": price,
+        }
+        if reduce_only:
+            params["reduceOnly"] = True
+        return self.client.new_order(**params)
+
+    def query_order(self, symbol: str, order_id: int) -> dict:
+        return self.client.query_order(symbol, orderId=order_id)
+
+    def cancel_order(self, symbol: str, order_id: int) -> dict:
+        return self.client.cancel_order(symbol, orderId=order_id)
