@@ -303,7 +303,7 @@ El entrenamiento: descarga velas históricas → calcula ~30 features técnicas 
 python -m pytest tests/ -q
 ```
 
-73 tests que cubren `src/strategy/ma_crossover.py`, `src/risk/risk_manager.py`, `src/backtest/engine.py`, `src/risk/portfolio_manager.py`, `src/strategy/sentiment.py`, `src/models/trainer.py` y `src/data/binance_client.py` (paginación de klines).
+79 tests que cubren `src/strategy/ma_crossover.py`, `src/risk/risk_manager.py`, `src/backtest/engine.py`, `src/risk/portfolio_manager.py`, `src/strategy/sentiment.py`, `src/models/trainer.py`, `src/data/binance_client.py` (paginación de klines) y sanidad del `trained_model.pkl` versionado.
 
 ---
 
