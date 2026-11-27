@@ -813,4 +813,9 @@ class BotRunner:
         s["ml_signal"] = sig.get("ml", "HOLD")
         s["enhanced_signal"] = sig.get("enhanced", "HOLD")
         s["last_signal"] = sig.get("consensus", "HOLD")
+        try:
+            from backend.core.config import funding_runner
+            s["funding"] = funding_runner.get_state()
+        except Exception:
+            s["funding"] = None
         return s
