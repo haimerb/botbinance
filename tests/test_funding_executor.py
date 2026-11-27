@@ -84,6 +84,16 @@ class FakeFuturesClient:
         return {"status": "CANCELED"}
 
 
+class PartialSpotExecutor(FakeSpotExecutor):
+    def query_order(self, symbol, order_id):
+        return {"status": "PARTIALLY_FILLED", "executedQty": 0.004}
+
+
+class PartialFuturesClient(FakeFuturesClient):
+    def query_order(self, symbol, order_id):
+        return {"status": "PARTIALLY_FILLED", "executedQty": 0.003}
+
+
 def test_open_creates_hedged_position():
     spot, futures = FakeSpotExecutor(), FakeFuturesClient()
     executor = FundingExecutor(spot, futures, dry_run=True)
@@ -195,3 +205,32 @@ def test_maker_timeout_without_edge_does_not_fallback():
     assert not result.ok
     assert "edge insuficiente" in result.error
     assert not any(c[0] == "SELL" for c in futures.calls)
+
+
+def test_close_reabre_short_si_falla_venta_spot():
+    spot = FakeSpotExecutor(fail_sell=True)
+    futures = FakeFuturesClient()
+    position = FundingPosition("BTCUSDT", 0.01, 60000, 0.0001,
+                               spot_order_id=1, perp_order_id=2)
+    result = FundingExecutor(spot, futures, dry_run=False).close(position)
+
+    assert not result.ok
+    assert "short reapertado" in result.error
+    sells = [c for c in futures.calls if c[0] == "SELL"]
+    assert len(sells) == 1
+    assert sells[0][2] == 0.01
+
+
+def test_maker_parcial_cancela_y_deshace_solo_lo_ejecutado():
+    spot = PartialSpotExecutor(statuses={1: "NEW"})
+    futures = PartialFuturesClient(maker_status="NEW")
+    result = FundingExecutor(spot, futures, dry_run=False).open(
+        "BTCUSDT", 0.01, 0.0003, mark_price=60000,
+        maker=True, maker_timeout=0, min_fallback_annual_pct=100,
+    )
+
+    assert not result.ok
+    assert ("CANCEL", 1, "BTCUSDT") in spot.calls
+    assert ("CANCEL", 100, "BTCUSDT") in futures.calls
+    assert ("SELL", 0.004, "BTCUSDT") in spot.calls
+    assert any(c[0] == "BUY" and c[2] == 0.003 for c in futures.calls)
