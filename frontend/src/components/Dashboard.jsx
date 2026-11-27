@@ -372,9 +372,10 @@ function Dashboard({ user, onLogout, onAccount }) {
         />
       </div>
 
-      <div className="card tv-chart-card">
-        <div className="card-header">
-          <span className="card-title">Gráfico de velas (Binance)</span>
+      <div className="chart-section glass">
+        <div className="chart-header">
+          <h2>Gráfico de velas - {activeSymbol?.replace('USDT', '/USDT') || '---'}</h2>
+          <span className="chart-timeframe">Precios del WS del bot · 200 velas</span>
         </div>
         <TradingViewChart symbol={activeSymbol || 'BTCUSDT'} price={currentPrices[activeSymbol]} />
       </div>
