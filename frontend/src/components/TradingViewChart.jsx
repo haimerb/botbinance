@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { getKlines } from '../api.js'
 
 const WIDTH = 720
@@ -19,19 +19,19 @@ function formatPrice(p) {
   return p.toFixed(4)
 }
 
-export default function TradingViewChart({ symbol = 'BTCUSDT', onSymbolChange }) {
+export default function TradingViewChart({ symbol = 'BTCUSDT', price = null }) {
   const [interval, setInterval_] = useState('1h')
   const [candles, setCandles] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [hover, setHover] = useState(null)
   const [livePrice, setLivePrice] = useState(null)
-  const wrapRef = useRef(null)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
+    setLivePrice(null)
 
     getKlines(symbol, interval, 200)
       .then((data) => {
@@ -52,32 +52,16 @@ export default function TradingViewChart({ symbol = 'BTCUSDT', onSymbolChange })
     }
   }, [symbol, interval])
 
-  useEffect(() => {
-    if (!symbol) return
-    const wsSymbol = symbol.toLowerCase().replace('/usdt', 'usdt')
-    let ws
-    try {
-      ws = new WebSocket(`wss://stream.binance.com:9443/ws/${wsSymbol}@trade`)
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data)
-          if (msg.p) setLivePrice(parseFloat(msg.p))
-        } catch {}
-      }
-      ws.onerror = () => {}
-    } catch {}
-    return () => {
-      if (ws) ws.close()
-    }
-  }, [symbol])
+  const priceNumber = price != null ? Number(price) : NaN
+  const currentPrice = Number.isFinite(priceNumber) ? priceNumber : livePrice
 
   const chart = useMemo(() => {
     if (!candles || candles.length < 2) return null
 
     const highs = candles.map((c) => c.high)
     const lows = candles.map((c) => c.low)
-    const maxPrice = Math.max(...highs, livePrice || 0)
-    const minPrice = Math.min(...lows, livePrice || Infinity)
+    const maxPrice = Math.max(...highs, currentPrice ?? 0)
+    const minPrice = Math.min(...lows, currentPrice ?? Infinity)
     const range = maxPrice - minPrice || 1
     const innerW = WIDTH - PADDING.left - PADDING.right
     const innerH = HEIGHT - PADDING.top - PADDING.bottom
@@ -112,15 +96,15 @@ export default function TradingViewChart({ symbol = 'BTCUSDT', onSymbolChange })
     })
 
     return { rendered, yLabels, xLabels, yOf, maxPrice, minPrice, innerH, innerW }
-  }, [candles, livePrice])
+  }, [candles, currentPrice])
 
-  const lastClose = livePrice ?? (candles.length ? candles[candles.length - 1].close : null)
+  const lastClose = currentPrice ?? (candles.length ? candles[candles.length - 1].close : null)
   const firstClose = candles.length ? candles[0].close : null
   const changePct = lastClose && firstClose ? ((lastClose - firstClose) / firstClose) * 100 : 0
   const positive = changePct >= 0
 
   return (
-    <div className="tv-chart-wrapper" ref={wrapRef}>
+    <div className="tv-chart-wrapper">
       <div className="tv-chart-header">
         <div className="tv-chart-title">
           <strong>{symbol}</strong>

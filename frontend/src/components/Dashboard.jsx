@@ -376,7 +376,7 @@ function Dashboard({ user, onLogout, onAccount }) {
         <div className="card-header">
           <span className="card-title">Gráfico de velas (Binance)</span>
         </div>
-        <TradingViewChart symbol={activeSymbol || 'BTCUSDT'} />
+        <TradingViewChart symbol={activeSymbol || 'BTCUSDT'} price={currentPrices[activeSymbol]} />
       </div>
 
       {stats && (
