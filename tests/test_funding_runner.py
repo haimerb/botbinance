@@ -1,6 +1,11 @@
 import pytest
+from prometheus_client import REGISTRY
 
 from backend.services.funding_runner import FundingRunner
+from backend.services.metrics import (
+    record_funding_decision,
+    update_funding_metrics,
+)
 from src.execution.funding_executor import FundingPosition
 from src.strategy.funding_gate import FundingDecision, FundingGate
 
@@ -249,3 +254,66 @@ def test_accounting_separates_funding_basis_and_fees():
     assert accounting["fees"] > 0
     assert accounting["basis"] < 0
     assert accounting["net"] < accounting["funding"]
+
+
+def test_tick_publishes_funding_metrics():
+    runner = _runner(FakeScanner([FakeOpp()]), FakeExecutor(), FakeFutures())
+    cycles_before = REGISTRY.get_sample_value("botbinance_funding_cycles_total") or 0
+    opened_before = (
+        REGISTRY.get_sample_value(
+            "botbinance_funding_positions_opened_total",
+            {"symbol": "BTCUSDT"},
+        )
+        or 0
+    )
+    runner.tick()
+    assert (
+        REGISTRY.get_sample_value("botbinance_funding_cycles_total")
+        == cycles_before + 1
+    )
+    assert REGISTRY.get_sample_value("botbinance_funding_position_active") == 1
+    assert REGISTRY.get_sample_value("botbinance_funding_position_hedged") == 1
+    assert (
+        REGISTRY.get_sample_value(
+            "botbinance_funding_positions_opened_total",
+            {"symbol": "BTCUSDT"},
+        )
+        == opened_before + 1
+    )
+
+
+def test_funding_metrics_read_state_and_decisions():
+    rejected_before = (
+        REGISTRY.get_sample_value(
+            "botbinance_funding_decisions_total",
+            {"symbol": "BTCUSDT", "result": "rejected", "reason": "zscore"},
+        )
+        or 0
+    )
+    record_funding_decision("BTCUSDT", False, "zscore")
+    update_funding_metrics({
+        "status": "running",
+        "position": None,
+        "opportunities": [
+            {"symbol": "SOLUSDT", "liquidation_pressure": 0.42},
+        ],
+        "accounting": {"net": 1.25},
+        "gate": {"persistence_enabled": True, "persistence_trained": True},
+    })
+    assert REGISTRY.get_sample_value("botbinance_funding_running") == 1
+    assert REGISTRY.get_sample_value("botbinance_funding_opportunities") == 1
+    assert REGISTRY.get_sample_value("botbinance_funding_net_pnl_usd") == 1.25
+    assert REGISTRY.get_sample_value("botbinance_funding_persistence_trained") == 1
+    assert (
+        REGISTRY.get_sample_value(
+            "botbinance_funding_liquidation_pressure", {"symbol": "SOLUSDT"}
+        )
+        == 0.42
+    )
+    assert (
+        REGISTRY.get_sample_value(
+            "botbinance_funding_decisions_total",
+            {"symbol": "BTCUSDT", "result": "rejected", "reason": "zscore"},
+        )
+        == rejected_before + 1
+    )

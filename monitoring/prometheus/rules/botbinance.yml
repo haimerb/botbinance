@@ -92,6 +92,54 @@ groups:
           summary: "High WebSocket reconnect rate"
           description: "Clients reconnecting frequently ({{ $value }}/min)"
 
+  - name: botbinance_funding
+    interval: 30s
+    rules:
+      - alert: FundingRunnerErrores
+        expr: increase(botbinance_funding_errors_total[10m]) > 0
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Errores en el funding runner"
+          description: "Se registraron {{ $value }} errores en los últimos 10 minutos"
+
+      - alert: FundingPersistenciaNoEntrenada
+        expr: botbinance_funding_running == 1 and botbinance_funding_persistence_enabled == 1 and botbinance_funding_persistence_trained == 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Persistencia de funding sin entrenar"
+          description: "El gate está activo pero el modelo de persistencia sigue sin entrenar"
+
+      - alert: FundingRechazosAltos
+        expr: rate(botbinance_funding_decisions_total{result="rejected"}[10m]) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Muchas oportunidades rechazadas por el gate"
+          description: "Tasa de rechazo de {{ $value }} decisiones/segundo en los últimos 10 minutos"
+
+      - alert: FundingPresionLiquidacionesAlta
+        expr: botbinance_funding_liquidation_pressure > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Presión de liquidaciones elevada en {{ $labels.symbol }}"
+          description: "Presión de {{ $value }} en el símbolo {{ $labels.symbol }}"
+
+      - alert: FundingPosicionSinCobertura
+        expr: botbinance_funding_position_active == 1 and botbinance_funding_position_hedged == 0
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Posición de funding sin cobertura"
+          description: "Hay una posición abierta sin pierna spot+perp cubierta"
+
   - name: botbinance_infrastructure
     interval: 30s
     rules:
