@@ -75,6 +75,11 @@ class FakeHistory:
         return [{"fundingRate": str(r)} for r in self.rates[:limit]]
 
 
+class FakeNormalizedHistory(FakeHistory):
+    def funding(self, symbol, limit=100):
+        return [{"funding_rate": r} for r in self.rates[:limit]]
+
+
 def _runner(scanner, executor, futures, *, gate=None, history_client=None):
     r = FundingRunner(dry_run=True)
     r.inject(scanner=scanner, executor=executor, gate=gate,
@@ -216,6 +221,15 @@ def test_runner_trains_persistence_model_from_history():
     )
     runner.tick()
     assert gate.persistence_model is not None
+    assert runner.get_state()["gate"]["persistence_trained"] is True
+
+
+def test_runner_reads_normalized_history_rows():
+    runner = _runner(
+        FakeScanner([FakeOpp()]), FakeExecutor(), FakeFutures(),
+        gate=FundingGate(), history_client=FakeNormalizedHistory(),
+    )
+    runner.tick()
     assert runner.get_state()["gate"]["persistence_trained"] is True
 
 

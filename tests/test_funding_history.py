@@ -69,6 +69,15 @@ def test_funding_paginates_without_duplicates():
     assert fake.funding_calls[1]["startTime"] == t1 + 1
 
 
+def test_funding_respects_explicit_limit():
+    fake = FakeFutures(
+        pages=[[{"fundingTime": t, "fundingRate": "0.0001"} for t in range(1000, 5000, 1000)]]
+    )
+    rows = FundingHistoryClient(fake).funding("BTCUSDT", limit=2)
+    assert len(rows) == 2
+    assert fake.funding_calls[0]["limit"] == 2
+
+
 def test_funding_stops_when_page_is_short():
     fake = FakeFutures(pages=[
         [{"fundingTime": 1000, "fundingRate": "0.0001"}]

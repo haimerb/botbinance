@@ -13,12 +13,15 @@ class FundingHistoryClient:
         self.kline_limit = kline_limit
         self.oi_limit = oi_limit
 
-    def funding(self, symbol, start_ms=None, end_ms=None):
+    def funding(self, symbol, start_ms=None, end_ms=None, limit=None):
         rows = []
         cursor = start_ms
         seen = set()
+        page_size = self.funding_limit
+        if limit is not None:
+            page_size = max(1, min(page_size, limit))
         while True:
-            kwargs = {"limit": self.funding_limit}
+            kwargs = {"limit": page_size}
             if cursor is not None:
                 kwargs["startTime"] = cursor
             if end_ms is not None:
@@ -35,7 +38,9 @@ class FundingHistoryClient:
                         "funding_rate": float(item["fundingRate"]),
                     })
             last = max(int(item["fundingTime"]) for item in batch)
-            if len(batch) < self.funding_limit:
+            if limit is not None and len(rows) >= limit:
+                return rows[:limit]
+            if len(batch) < page_size:
                 break
             if end_ms is not None and last >= end_ms:
                 break
