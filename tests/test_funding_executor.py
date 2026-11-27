@@ -5,26 +5,48 @@ from src.execution.trade_executor import OrderResult
 
 
 class FakeSpotExecutor:
-    def __init__(self, *, fail_buy=False, fail_sell=False):
+    def __init__(self, *, fail_buy=False, fail_sell=False, statuses=None):
         self.fail_buy = fail_buy
         self.fail_sell = fail_sell
         self.calls = []
+        self.details = []
+        self.statuses = statuses or {}
 
-    def execute_order(self, side, quantity, symbol="BTCUSDT", order_type="MARKET"):
+    def execute_order(self, side, quantity, symbol="BTCUSDT",
+                      order_type="MARKET", price=None, time_in_force=None):
         self.calls.append((side, quantity, symbol))
+        self.details.append({
+            "order_type": order_type, "price": price,
+            "time_in_force": time_in_force,
+        })
         if side == "BUY" and self.fail_buy:
             return OrderResult.failure(side, symbol, quantity, "sin saldo")
         if side == "SELL" and self.fail_sell:
             return OrderResult.failure(side, symbol, quantity, "sell rechazado")
-        return OrderResult(ok=True, side=side, symbol=symbol, quantity=quantity,
-                           order_id=len(self.calls), status="FILLED",
-                           filled_qty=quantity, avg_price=60000.0)
+        order_id = len(self.calls)
+        return OrderResult(
+            ok=True, side=side, symbol=symbol, quantity=quantity,
+            order_id=order_id, status=self.statuses.get(order_id, "FILLED"),
+            filled_qty=quantity, avg_price=price or 60000.0,
+        )
+
+    def get_symbol_price(self, symbol="BTCUSDT"):
+        return 60000.0
+
+    def query_order(self, symbol, order_id):
+        return {"status": self.statuses.get(order_id, "FILLED")}
+
+    def cancel_order(self, symbol, order_id):
+        self.calls.append(("CANCEL", order_id, symbol))
+        return {"status": "CANCELED"}
 
 
 class FakeFuturesClient:
-    def __init__(self, *, fail_order=False):
+    def __init__(self, *, fail_order=False, maker_status="FILLED"):
         self.fail_order = fail_order
+        self.maker_status = maker_status
         self.calls = []
+        self.maker_calls = []
 
     def set_margin_type(self, symbol, margin_type):
         self.calls.append(("margin", symbol, margin_type))
@@ -40,6 +62,17 @@ class FakeFuturesClient:
             raise RuntimeError("perp sin liquidez")
         return {"orderId": 99, "status": "FILLED"}
 
+    def place_limit_order(self, symbol, side, quantity, price, **kwargs):
+        self.maker_calls.append((side, symbol, quantity, price, kwargs))
+        return {"orderId": 100, "status": self.maker_status}
+
+    def query_order(self, symbol, order_id):
+        return {"status": self.maker_status if order_id == 100 else "FILLED"}
+
+    def cancel_order(self, symbol, order_id):
+        self.calls.append(("CANCEL", order_id, symbol))
+        return {"status": "CANCELED"}
+
 
 def test_open_creates_hedged_position():
     spot, futures = FakeSpotExecutor(), FakeFuturesClient()
@@ -49,12 +82,12 @@ def test_open_creates_hedged_position():
     assert result.ok is True
     assert result.position.is_hedged is True
     assert spot.calls == [("BUY", 0.01, "BTCUSDT")]
-    assert any(c[0] == "SELL" for c in futures.calls)
+    assert futures.calls == []
 
 
 def test_open_uses_isolated_margin_and_leverage_one():
     spot, futures = FakeSpotExecutor(), FakeFuturesClient()
-    FundingExecutor(spot, futures, dry_run=True).open("BTCUSDT", 0.01, 0.0001)
+    FundingExecutor(spot, futures, dry_run=False).open("BTCUSDT", 0.01, 0.0001)
     assert ("margin", "BTCUSDT", "ISOLATED") in futures.calls
     assert ("leverage", "BTCUSDT", 1) in futures.calls
 
@@ -104,3 +137,40 @@ def test_close_in_dry_run_does_not_send_perp_order():
     executor.close(position)
     assert [c[0] for c in futures.calls] == []
     assert spot.calls == [("SELL", 0.01, "BTCUSDT")]
+
+
+def test_maker_uses_post_only_on_both_legs():
+    spot, futures = FakeSpotExecutor(), FakeFuturesClient()
+    result = FundingExecutor(spot, futures, dry_run=False).open(
+        "BTCUSDT", 0.01, 0.0003, mark_price=60000, maker=True
+    )
+    assert result.ok
+    assert spot.details[0]["order_type"] == "LIMIT"
+    assert spot.details[0]["time_in_force"] == "GTX"
+    assert spot.details[0]["price"] < 60000
+    assert futures.maker_calls[0][3] > 60000
+    assert futures.maker_calls[0][4]["post_only"] is True
+
+
+def test_maker_timeout_falls_back_to_taker_with_high_edge():
+    spot = FakeSpotExecutor(statuses={1: "NEW"})
+    futures = FakeFuturesClient(maker_status="NEW")
+    result = FundingExecutor(spot, futures, dry_run=False).open(
+        "BTCUSDT", 0.01, 0.0003, mark_price=60000,
+        maker=True, maker_timeout=0,
+    )
+    assert result.ok
+    assert any(c[0] == "SELL" for c in futures.calls)
+    assert result.position.is_hedged
+
+
+def test_maker_timeout_without_edge_does_not_fallback():
+    spot = FakeSpotExecutor(statuses={1: "NEW"})
+    futures = FakeFuturesClient(maker_status="NEW")
+    result = FundingExecutor(spot, futures, dry_run=False).open(
+        "BTCUSDT", 0.01, 0.000001, mark_price=60000,
+        maker=True, maker_timeout=0,
+    )
+    assert not result.ok
+    assert "edge insuficiente" in result.error
+    assert not any(c[0] == "SELL" for c in futures.calls)

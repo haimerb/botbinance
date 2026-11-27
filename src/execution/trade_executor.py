@@ -33,12 +33,14 @@ class TradeExecutor:
         self.dry_run = DRY_RUN if dry_run is None else dry_run
 
     def execute_order(
-        self, side: str, quantity: float, symbol: str = "BTCUSDT", order_type="MARKET"
+        self, side: str, quantity: float, symbol: str = "BTCUSDT",
+        order_type="MARKET", price: float = None, time_in_force: str = None
     ) -> OrderResult:
         qty = quantity
-        ref_price = 0.0
-        if order_type == "MARKET":
-            ref_price = self.get_symbol_price(symbol)
+        ref_price = float(price) if price is not None else 0.0
+        if order_type == "MARKET" or price is not None:
+            if not ref_price:
+                ref_price = self.get_symbol_price(symbol)
             qty, _price, error = self.filters.normalize_order(
                 self.client, symbol, quantity, ref_price
             )
@@ -50,11 +52,17 @@ class TradeExecutor:
             return self._simulate_order(side, symbol, qty, ref_price)
 
         try:
+            extra = {}
+            if price is not None:
+                extra["price"] = price
+            if time_in_force:
+                extra["timeInForce"] = time_in_force
             order = self.client.new_order(
                 symbol=symbol,
                 side=side,
                 type=order_type,
-                quantity=qty
+                quantity=qty,
+                **extra,
             )
             self.last_order = order
             filled_qty = float(order.get("executedQty", 0) or 0)
@@ -109,3 +117,13 @@ class TradeExecutor:
         except Exception as e:
             print(f"Error obteniendo precio: {e}")
             return 0.0
+
+    def query_order(self, symbol: str, order_id: int) -> dict:
+        if self.dry_run:
+            return {"orderId": order_id, "status": "FILLED"}
+        return self.client.get_order(symbol=symbol, orderId=order_id)
+
+    def cancel_order(self, symbol: str, order_id: int) -> dict:
+        if self.dry_run:
+            return {"orderId": order_id, "status": "CANCELED"}
+        return self.client.cancel_order(symbol=symbol, orderId=order_id)

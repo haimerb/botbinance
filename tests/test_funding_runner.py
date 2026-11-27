@@ -29,9 +29,11 @@ class FakeExecutor:
         self.close_ok = close_ok
         self.opened = []
         self.closed = []
+        self.open_kwargs = []
 
-    def open(self, symbol, quantity, rate, mark_price=0):
+    def open(self, symbol, quantity, rate, mark_price=0, **kwargs):
         from src.execution.funding_executor import FundingExecutionResult
+        self.open_kwargs.append(kwargs)
         if not self.open_ok:
             return FundingExecutionResult(ok=False, error="perp rechazado")
         return FundingExecutionResult(
@@ -195,6 +197,15 @@ def test_gate_ranks_by_score_instead_of_scanner_order():
     )
     runner.tick()
     assert runner.get_state()["position"]["symbol"] == "ETHUSDT"
+
+
+def test_runner_requests_maker_entry_from_executor():
+    executor = FakeExecutor()
+    runner = _runner(FakeScanner([FakeOpp()]), executor, FakeFutures())
+    runner.tick()
+    assert executor.open_kwargs[0]["maker"] is True
+    assert "maker_timeout" in executor.open_kwargs[0]
+    assert runner.get_state()["execution"]["maker"] is True
 
 
 def test_accounting_separates_funding_basis_and_fees():
