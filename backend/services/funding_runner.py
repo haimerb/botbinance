@@ -282,9 +282,7 @@ class FundingRunner:
                 rows = self._history_client.funding(symbol, limit=limit)
             except Exception:
                 continue
-            history_by_symbol[symbol] = [
-                float(row["fundingRate"]) for row in rows
-            ]
+            history_by_symbol[symbol] = self._rates_from_rows(rows)
         if not history_by_symbol:
             return
         model = FundingPersistenceModel(
@@ -304,7 +302,14 @@ class FundingRunner:
             rows = self._history_client.funding(symbol, limit=limit)
         except Exception:
             return []
-        return [float(row["fundingRate"]) for row in rows]
+        return self._rates_from_rows(rows)
+
+    @staticmethod
+    def _rates_from_rows(rows):
+        return [
+            float(row.get("funding_rate", row.get("fundingRate", 0)))
+            for row in rows
+        ]
 
     def _recalculate_net(self):
         accounting = self.state["accounting"]
