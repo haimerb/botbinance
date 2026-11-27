@@ -16,6 +16,10 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+
 class AlertmanagerLabels(BaseModel):
     alertname: str
     severity: str = "info"

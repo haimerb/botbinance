@@ -1,3 +1,4 @@
+import hashlib
 import os
 from contextlib import contextmanager
 from datetime import datetime
@@ -28,6 +29,19 @@ class User(Base):
     mfa_enabled = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
 
 
 class UserConfig(Base):
@@ -164,6 +178,102 @@ def get_session():
 
 def get_session_simple():
     return SessionLocal()
+
+
+def _hash_refresh_jti(jti: str) -> str:
+    return hashlib.sha256(jti.encode()).hexdigest()
+
+
+def _refresh_token_naive(exp: datetime) -> datetime:
+    return exp.replace(tzinfo=None) if exp.tzinfo else exp
+
+
+def store_refresh_token(
+    user_id: int,
+    jti: str,
+    expires_at: datetime,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+):
+    with get_session() as session:
+        session.add(
+            RefreshToken(
+                user_id=user_id,
+                token_hash=_hash_refresh_jti(jti),
+                expires_at=_refresh_token_naive(expires_at),
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+        )
+
+
+def is_refresh_token_active(user_id: int, jti: str) -> bool:
+    token_hash = _hash_refresh_jti(jti)
+    with get_session() as session:
+        record = (
+            session.query(RefreshToken)
+            .filter(
+                RefreshToken.user_id == user_id,
+                RefreshToken.token_hash == token_hash,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.expires_at > datetime.now(),
+            )
+            .first()
+        )
+        return record is not None
+
+
+def rotate_refresh_token(
+    user_id: int,
+    old_jti: str,
+    new_jti: str,
+    new_expires_at: datetime,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+) -> bool:
+    token_hash = _hash_refresh_jti(old_jti)
+    with get_session() as session:
+        record = (
+            session.query(RefreshToken)
+            .filter(
+                RefreshToken.user_id == user_id,
+                RefreshToken.token_hash == token_hash,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.expires_at > datetime.now(),
+            )
+            .first()
+        )
+        if not record:
+            return False
+        record.revoked_at = datetime.now()
+        session.add(
+            RefreshToken(
+                user_id=user_id,
+                token_hash=_hash_refresh_jti(new_jti),
+                expires_at=_refresh_token_naive(new_expires_at),
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+        )
+    return True
+
+
+def revoke_refresh_token(user_id: int, jti: str) -> bool:
+    token_hash = _hash_refresh_jti(jti)
+    with get_session() as session:
+        record = (
+            session.query(RefreshToken)
+            .filter(
+                RefreshToken.user_id == user_id,
+                RefreshToken.token_hash == token_hash,
+                RefreshToken.revoked_at.is_(None),
+            )
+            .first()
+        )
+        if not record:
+            return False
+        record.revoked_at = datetime.now()
+    return True
 
 
 def add_user(email: str, password_hash: str) -> User:

@@ -4,6 +4,7 @@ const electronBackend = window.electronAPI && window.electronAPI.backendUrl
 const BASE = electronBackend || '/api'
 
 export function getToken() { return localStorage.getItem('token') }
+export function getRefreshToken() { return localStorage.getItem('refresh_token') }
 
 function authHeaders() {
   const token = getToken()
@@ -37,21 +38,39 @@ async function request(path, options = {}) {
 }
 
 export function setToken(t) { localStorage.setItem('token', t) }
-export function clearToken() { localStorage.removeItem('token') }
+export function clearToken() {
+  localStorage.removeItem('token')
+  localStorage.removeItem('refresh_token')
+}
 export function isAuthenticated() { return !!getToken() }
+
+function storeAuth(res) {
+  setToken(res.token)
+  if (res.refresh_token) localStorage.setItem('refresh_token', res.refresh_token)
+  return res
+}
 
 export function register(email, password) {
   return request('/auth/register', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
-  })
+  }).then(storeAuth)
 }
 
 export function login(email, password) {
   return request('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
-  })
+  }).then(storeAuth)
+}
+
+export function logout() {
+  const refreshToken = getRefreshToken()
+  if (!refreshToken) return Promise.resolve()
+  return request('/auth/logout', {
+    method: 'POST',
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  }).catch(() => {})
 }
 
 export function getMe() {

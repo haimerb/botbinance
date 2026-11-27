@@ -35,9 +35,11 @@ export default function App() {
   }
 
   const handleLogout = () => {
-    api.clearToken()
-    setAuthed(false)
-    setUser(null)
+    api.logout().finally(() => {
+      api.clearToken()
+      setAuthed(false)
+      setUser(null)
+    })
   }
 
   if (authed === null) {
