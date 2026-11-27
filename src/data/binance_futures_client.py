@@ -15,22 +15,32 @@ class BinanceFuturesClient:
     ``BinanceDataClient``.
     """
 
-    def __init__(self, api_key: str = None, api_secret: str = None):
+    def __init__(self, api_key: str = None, api_secret: str = None,
+                 base_url: str = None):
         key = api_key if api_key is not None else BINANCE_API_KEY
         secret = api_secret if api_secret is not None else BINANCE_API_SECRET
         self.client = UMFutures(
             key=key,
             secret=secret,
-            base_url=BINANCE_FUTURES_BASE_URL,
+            base_url=base_url or BINANCE_FUTURES_BASE_URL,
         )
 
     def mark_price(self, symbol: str) -> dict:
         """Devuelve markPrice, indexPrice, lastFundingRate y nextFundingTime."""
         return self.client.mark_price(symbol)
 
-    def funding_rate(self, symbol: str, limit: int = 100) -> list:
-        """Historial de funding (más reciente primero en la práctica)."""
-        return self.client.funding_rate(symbol=symbol, limit=limit)
+    def funding_rate(self, symbol: str, limit: int = 100, **kwargs) -> list:
+        """Historial de funding; admite ``startTime``/``endTime``."""
+        return self.client.funding_rate(symbol=symbol, limit=limit, **kwargs)
+
+    def mark_price_klines(self, symbol: str, interval: str, **kwargs) -> list:
+        return self.client.mark_price_klines(symbol=symbol, interval=interval, **kwargs)
+
+    def index_price_klines(self, pair: str, interval: str, **kwargs) -> list:
+        return self.client.index_price_klines(pair=pair, interval=interval, **kwargs)
+
+    def open_interest_hist(self, symbol: str, period: str, **kwargs) -> list:
+        return self.client.open_interest_hist(symbol=symbol, period=period, **kwargs)
 
     def exchange_info(self, symbol: str = None) -> dict:
         return self.client.exchange_info(symbol=symbol)

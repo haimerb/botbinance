@@ -62,6 +62,19 @@ def test_client_uses_explicit_credentials_and_futures_url(monkeypatch):
     assert "binancefuture" in fake.kwargs["base_url"] or "fapi" in fake.kwargs["base_url"]
 
 
+def test_client_accepts_base_url_override(monkeypatch):
+    fake = FakeUMFutures()
+
+    def fake_umfutures(**kwargs):
+        fake.kwargs = kwargs
+        return fake
+
+    monkeypatch.setattr("src.data.binance_futures_client.UMFutures", fake_umfutures)
+    BinanceFuturesClient(api_key="k", api_secret="s",
+                         base_url="https://fapi.binance.com")
+    assert fake.kwargs["base_url"] == "https://fapi.binance.com"
+
+
 def test_client_falls_back_to_global_credentials(monkeypatch):
     captured = {}
 
