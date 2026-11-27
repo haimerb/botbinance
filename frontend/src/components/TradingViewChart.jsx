@@ -132,7 +132,7 @@ export default function TradingViewChart({ symbol = 'BTCUSDT', price = null }) {
       </div>
 
       {loading && <div className="tv-chart-status">Cargando velas…</div>}
-      {error && <div className="tv-chart-status error">{error}</div>}
+      {error && <div className="tv-chart-status error"><span className="error-icon small">!</span>{error}</div>}
 
       {!loading && !error && !chart && (
         <div className="tv-chart-status">Sin datos disponibles</div>

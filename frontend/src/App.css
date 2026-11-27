@@ -65,6 +65,14 @@ body {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.error-icon {
+  width: 48px; height: 48px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--red-glow); border: 1px solid rgba(251, 113, 133, 0.4);
+  color: var(--red); font-size: 1.4rem; font-weight: 700;
+}
+.error-icon.small { width: 20px; height: 20px; font-size: 0.75rem; flex-shrink: 0; }
+
 /* ===== AUTH ===== */
 .auth-screen {
   display: flex; align-items: center; justify-content: center;
@@ -553,7 +561,10 @@ tr:last-child td { border-bottom: none; }
   padding: 40px 0; text-align: center;
   color: var(--text-dim); font-size: 0.8rem;
 }
-.tv-chart-status.error { color: #ef4444; }
+.tv-chart-status.error {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  color: #ef4444;
+}
 .tv-candle { transition: opacity 0.15s; }
 .tv-candle:hover { opacity: 0.85; }
 .tv-tooltip {
