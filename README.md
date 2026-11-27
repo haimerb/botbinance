@@ -300,10 +300,10 @@ El entrenamiento: descarga velas históricas → calcula ~30 features técnicas 
 ## ✅ Tests
 
 ```bash
-python -m pytest tests/ -q
+DRY_RUN=false python -m pytest tests/ -q
 ```
 
-79 tests que cubren `src/strategy/ma_crossover.py`, `src/risk/risk_manager.py`, `src/backtest/engine.py`, `src/risk/portfolio_manager.py`, `src/strategy/sentiment.py`, `src/models/trainer.py`, `src/data/binance_client.py` (paginación de klines) y sanidad del `trained_model.pkl` versionado.
+184 tests que cubren `src/strategy/ma_crossover.py`, `src/risk/risk_manager.py`, `src/backtest/engine.py`, `src/risk/portfolio_manager.py`, `src/strategy/sentiment.py`, `src/models/trainer.py`, `src/data/binance_client.py` (paginación de klines), el flujo de funding (históricos, gate, persistencia, runner y ejecución), autenticación con refresh tokens, webhook de alertas, ejecución de órdenes y sanidad del `trained_model.pkl` versionado.
 
 ---
 
