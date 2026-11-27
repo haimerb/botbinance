@@ -163,6 +163,10 @@ header h1 {
 .badge.running { background: var(--green-glow); color: var(--green); }
 .badge.stopped { background: var(--red-glow); color: var(--red); }
 .badge.mock { background: rgba(96, 165, 250, 0.12); color: var(--blue); }
+.badge.conectando { background: var(--accent-glow); color: var(--accent); }
+.badge.en_vivo { background: var(--accent-glow); color: var(--accent); }
+.badge.reconectando { background: var(--accent-glow); color: var(--accent); }
+.badge.sin_conexion { background: var(--red-glow); color: var(--red); }
 .badge-dot {
   width: 5px; height: 5px; border-radius: 50%;
   background: currentColor;

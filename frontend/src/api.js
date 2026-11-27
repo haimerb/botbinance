@@ -25,6 +25,12 @@ async function request(path, options = {}) {
       const err = await res.json()
       detail = err.detail
     } catch {}
+    if (res.status === 401 && !path.startsWith('/auth/')) {
+      clearToken()
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('auth:unauthorized'))
+      }
+    }
     throw new Error(detail || `Error ${res.status}`)
   }
   return res.json()
@@ -136,6 +142,7 @@ function getWsUrl() {
 
 let ws = null
 let wsCallbacks = new Set()
+let connectionListeners = new Set()
 let reconnectTimer = null
 let reconnectAttempts = 0
 const MAX_RECONNECT_ATTEMPTS = 10
@@ -147,16 +154,23 @@ function getReconnectDelay(attempt) {
   return delay + Math.random() * 1000
 }
 
-export function connectWs(onUpdate) {
+function notifyConnection(status, detail = '') {
+  connectionListeners.forEach(cb => cb(status, detail))
+}
+
+export function connectWs(onUpdate, onConnectionChange) {
   wsCallbacks.add(onUpdate)
+  if (onConnectionChange) connectionListeners.add(onConnectionChange)
   if (ws && ws.readyState === WebSocket.OPEN) return
   if (ws) ws.close()
 
   const token = getToken()
   if (!token) {
     console.warn('No token available for WebSocket connection')
+    notifyConnection('sin_conexion', 'Sin token')
     return
   }
+  notifyConnection('conectando')
   
   const wsUrl = `${getWsUrl()}?token=${encodeURIComponent(token)}`
   ws = new WebSocket(wsUrl)
@@ -168,18 +182,20 @@ export function connectWs(onUpdate) {
     } catch {}
   }
 
-  ws.onclose = (event) => {
+  ws.onclose = () => {
     ws = null
     reconnectAttempts++
-    
+
     if (wsCallbacks.size > 0 && !reconnectTimer) {
       if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
         console.error('Max WebSocket reconnect attempts reached')
+        notifyConnection('sin_conexion', 'Sin conexión')
         wsCallbacks.forEach(cb => cb({ error: 'Max reconnection attempts reached' }))
         return
       }
-      
+
       const delay = getReconnectDelay(reconnectAttempts)
+      notifyConnection('reconectando', `Intento ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`)
       console.log(`WebSocket reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`)
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null
@@ -190,17 +206,20 @@ export function connectWs(onUpdate) {
 
   ws.onerror = (error) => {
     console.error('WebSocket error:', error)
+    notifyConnection('reconectando', 'Error de conexión')
     ws.close()
   }
   
   ws.onopen = () => {
     reconnectAttempts = 0
+    notifyConnection('en_vivo')
     console.log('WebSocket connected')
   }
 }
 
-export function disconnectWs(onUpdate) {
+export function disconnectWs(onUpdate, onConnectionChange) {
   wsCallbacks.delete(onUpdate)
+  if (onConnectionChange) connectionListeners.delete(onConnectionChange)
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)
     reconnectTimer = null

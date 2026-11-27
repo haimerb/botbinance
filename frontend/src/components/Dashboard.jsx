@@ -25,14 +25,18 @@ function Dashboard({ user, onLogout, onAccount }) {
   const [funding, setFunding] = useState(null)
   const [fundingError, setFundingError] = useState('')
   const [alerts, setAlerts] = useState([])
+  const [connection, setConnection] = useState('conectando')
+  const stateRef = useRef(null)
+  const activeSymbolRef = useRef(null)
   const lastTradeIdRef = useRef(0)
   const priceHistoryRef = useRef({})
   const notifTimeoutRef = useRef(null)
 
   const handleWsUpdate = useCallback((data) => {
     setState(prev => {
-      if (!prev) return data
-      return { ...prev, ...data }
+      const next = prev ? { ...prev, ...data } : data
+      stateRef.current = next
+      return next
     })
     if (data?.current_prices) {
       const hist = priceHistoryRef.current
@@ -50,10 +54,17 @@ function Dashboard({ user, onLogout, onAccount }) {
     if (data?.alerts) setAlerts(data.alerts)
   }, [])
 
+  const handleConnectionChange = useCallback((status) => {
+    setConnection(status)
+  }, [])
+
   const fetchTradesAndStats = useCallback(async () => {
     try {
       const [s, t, st] = await Promise.all([api.getStatus(), api.getTrades(tradeLimit), api.getTradeStats()])
-      if (!state) setState(s)
+      if (!stateRef.current) {
+        stateRef.current = s
+        setState(s)
+      }
       setTrades(t.trades || [])
       setStats(st)
 
@@ -74,11 +85,12 @@ function Dashboard({ user, onLogout, onAccount }) {
         lastTradeIdRef.current = serverLastId
       }
 
-      if (s?.symbols?.length && !activeSymbol) {
+      if (s?.symbols?.length && !activeSymbolRef.current) {
+        activeSymbolRef.current = s.symbols[0]
         setActiveSymbol(s.symbols[0])
       }
     } catch (e) { console.error('Error fetching trades/stats:', e) }
-  }, [tradeLimit, activeSymbol, state])
+  }, [tradeLimit])
 
   const fetchFunding = useCallback(async () => {
     try {
@@ -95,7 +107,11 @@ function Dashboard({ user, onLogout, onAccount }) {
   }, [])
 
   useEffect(() => {
-    api.connectWs(handleWsUpdate)
+    api.connectWs(handleWsUpdate, handleConnectionChange)
+    return () => api.disconnectWs(handleWsUpdate, handleConnectionChange)
+  }, [handleWsUpdate, handleConnectionChange])
+
+  useEffect(() => {
     fetchTradesAndStats()
     fetchFunding()
     fetchAlerts()
@@ -104,14 +120,15 @@ function Dashboard({ user, onLogout, onAccount }) {
       fetchFunding()
       fetchAlerts()
     }, 5000)
-    return () => { api.disconnectWs(handleWsUpdate); clearInterval(interval) }
-  }, [handleWsUpdate, fetchTradesAndStats, fetchFunding, fetchAlerts])
+    return () => clearInterval(interval)
+  }, [fetchTradesAndStats, fetchFunding, fetchAlerts])
 
   useEffect(() => {
+    activeSymbolRef.current = activeSymbol
     if (state?.symbols?.length && activeSymbol && !state.symbols.includes(activeSymbol)) {
       setActiveSymbol(state.symbols[0])
     }
-  }, [state?.symbols])
+  }, [activeSymbol, state?.symbols])
 
   const handleStart = async () => {
     try { await api.startBot(); fetchTradesAndStats() } catch (e) { setNotification({ type: 'error', message: e.message }); notifTimeoutRef.current = setTimeout(() => setNotification(null), 5000) }
@@ -146,6 +163,12 @@ function Dashboard({ user, onLogout, onAccount }) {
   const isRunning = state?.status === 'running'
   const isMock = state?.mock_mode
   const isDryRun = state?.dry_run
+  const connectionLabel = {
+    conectando: 'Conectando',
+    en_vivo: 'WS activo',
+    reconectando: 'Reconectando',
+    sin_conexion: 'Sin conexión',
+  }[connection] || 'Conectando'
   const symbols = state?.symbols || []
   const currentPrices = state?.current_prices || {}
   const positions = state?.positions || {}
@@ -197,6 +220,10 @@ function Dashboard({ user, onLogout, onAccount }) {
           <div className={`badge ${isRunning ? 'running' : 'stopped'}`}>
             <span className="badge-dot" />
             {isRunning ? 'En Vivo' : 'Detenido'}
+          </div>
+          <div className={`badge ${connection}`}>
+            <span className="badge-dot" />
+            {connectionLabel}
           </div>
           <button className="btn-ghost" onClick={onAccount}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
