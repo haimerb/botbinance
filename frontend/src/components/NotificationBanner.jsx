@@ -9,7 +9,7 @@ export default function NotificationBanner({ notification, onDismiss }) {
   const action = isError ? 'Error' : isEntry ? 'Compra' : isLoss ? 'Stop Loss' : 'Venta'
   const dir = isError ? '\u2716' : notification.side === 'BUY' ? '\u2191' : '\u2193'
   return (
-    <div className={`notif notif-${cls}`} onClick={onDismiss}>
+    <div className={`notif notif-${cls}`} role={isError ? 'alert' : 'status'} aria-live={isError ? 'assertive' : 'polite'}>
       <span className="notif-icon">{dir}</span>
       <span className="notif-body">
         <strong>{symbol}</strong> {action}
@@ -21,7 +21,7 @@ export default function NotificationBanner({ notification, onDismiss }) {
           </span>
         )}
       </span>
-      <span className="notif-close">\u00d7</span>
+      <button type="button" className="notif-close" onClick={onDismiss} aria-label="Cerrar notificación">\u00d7</button>
     </div>
   )
 }

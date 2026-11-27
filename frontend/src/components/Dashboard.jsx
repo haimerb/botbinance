@@ -221,7 +221,7 @@ function Dashboard({ user, onLogout, onAccount }) {
             <span className="badge-dot" />
             {isRunning ? 'En Vivo' : 'Detenido'}
           </div>
-          <div className={`badge ${connection}`}>
+          <div className={`badge ${connection}`} role="status" aria-live="polite" aria-atomic="true">
             <span className="badge-dot" />
             {connectionLabel}
           </div>
