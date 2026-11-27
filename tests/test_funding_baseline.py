@@ -1,5 +1,10 @@
-from src.backtest.funding_baseline import compare_with_simple, run_funding_backtest
-from src.strategy.event_calendar import _to_ms
+from src.backtest.funding_baseline import (
+    compare_with_simple,
+    run_funding_backtest,
+    summarize_walk_forward,
+    walk_forward_funding_validation,
+)
+from src.strategy.event_calendar import EconomicCalendar, _to_ms
 from src.strategy.funding_gate import FundingGate
 
 BASE = _to_ms("2026-11-20T00:00:00Z")
@@ -39,3 +44,25 @@ def test_gate_beats_simple_with_same_costs():
     assert result["gate"]["trades"] >= 3
     assert result["accepted"]
     assert result["delta_net_pnl"] > 0
+
+
+def test_walk_forward_accepts_gate_without_lookahead():
+    result = walk_forward_funding_validation(
+        {"BTCUSDT": _rows()},
+        folds=3,
+        train_size=20,
+        test_size=10,
+        gate_kwargs={"calendar": EconomicCalendar(events=[])},
+        persistence_kwargs={"min_samples": 2},
+    )
+    folds = result["folds"]
+    assert len(folds) == 3
+    assert all(f["test_start"] == f["train_end"] for f in folds)
+    assert all(f["test_end"] <= f["train_end"] + 10 for f in folds)
+    assert result["summary"]["accepted"] is True
+    assert result["summary"]["delta_net_pnl"] > 0
+    assert result["summary"]["gate_trades"] >= 3
+
+
+def test_walk_forward_empty_summary_is_rejected():
+    assert summarize_walk_forward([])["accepted"] is False
