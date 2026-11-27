@@ -16,6 +16,10 @@ from backend.services.database import (
     add_user,
     update_binance_keys,
     log_audit,
+    store_refresh_token,
+    is_refresh_token_active,
+    rotate_refresh_token,
+    revoke_refresh_token,
 )
 from backend.services.metrics import (
     AUTH_LOGIN_TOTAL,
@@ -26,6 +30,7 @@ from backend.schemas import (
     RegisterRequest,
     LoginRequest,
     RefreshTokenRequest,
+    LogoutRequest,
     BinanceKeysRequest,
 )
 
@@ -49,6 +54,19 @@ def _security_alert(event_type: str, detail: str, request: Request):
         )
     except Exception:
         pass
+
+
+def _issue_tokens(user, request: Request) -> dict:
+    tokens = create_token_pair(user.id, user.email)
+    meta = _client_meta(request)
+    store_refresh_token(
+        user.id,
+        tokens["jti"],
+        tokens["refresh_expires_at"],
+        ip_address=meta["ip_address"],
+        user_agent=meta["user_agent"],
+    )
+    return tokens
 
 
 def validate_password_complexity(password: str) -> str | None:
@@ -83,7 +101,7 @@ def register(request: Request, req: RegisterRequest):
         )
         raise HTTPException(status_code=400, detail="Email ya registrado")
     user = add_user(req.email, hash_password(req.password))
-    tokens = create_token_pair(user.id, user.email)
+    tokens = _issue_tokens(user, request)
     log_audit(
         user_id=user.id,
         event_type="register_success",
@@ -127,7 +145,7 @@ def login(request: Request, req: LoginRequest):
             raise HTTPException(status_code=401, detail="Código MFA inválido")
         AUTH_MFA_VERIFIED.labels(status="success").inc()
 
-    token = create_token_pair(user.id, user.email)
+    token = _issue_tokens(user, request)
     log_audit(
         user_id=user.id,
         event_type="login_success",
@@ -153,12 +171,27 @@ def refresh_token(request: Request, req: RefreshTokenRequest):
         if not user:
             AUTH_TOKEN_REFRESH.labels(status="failed").inc()
             raise HTTPException(status_code=401, detail="Usuario no encontrado")
+        meta = _client_meta(request)
+        if not is_refresh_token_active(user.id, payload["jti"]):
+            AUTH_TOKEN_REFRESH.labels(status="failed").inc()
+            raise HTTPException(status_code=401, detail="Token de refresco revocado")
         tokens = create_token_pair(user.id, user.email)
+        rotated = rotate_refresh_token(
+            user.id,
+            payload["jti"],
+            tokens["jti"],
+            tokens["refresh_expires_at"],
+            ip_address=meta["ip_address"],
+            user_agent=meta["user_agent"],
+        )
+        if not rotated:
+            AUTH_TOKEN_REFRESH.labels(status="failed").inc()
+            raise HTTPException(status_code=401, detail="Token de refresco revocado")
         log_audit(
             user_id=user.id,
             event_type="token_refreshed",
             event_data=f"email={user.email}",
-            **_client_meta(request),
+            **meta,
         )
         AUTH_TOKEN_REFRESH.labels(status="success").inc()
         return {
@@ -172,6 +205,25 @@ def refresh_token(request: Request, req: RefreshTokenRequest):
     except Exception:
         AUTH_TOKEN_REFRESH.labels(status="failed").inc()
         raise HTTPException(status_code=401, detail="Token de refresco inválido")
+
+
+@router.post("/logout")
+@limiter.limit("10/minute")
+def logout(request: Request, req: LogoutRequest):
+    payload = decode_refresh_token(req.refresh_token)
+    user = get_user_by_id(payload["sub"])
+    if not user:
+        raise HTTPException(status_code=401, detail="Token de refresco inválido")
+    revoked = revoke_refresh_token(user.id, payload["jti"])
+    if not revoked:
+        raise HTTPException(status_code=401, detail="Token de refresco revocado")
+    log_audit(
+        user_id=user.id,
+        event_type="logout",
+        event_data="refresh_token_revoked",
+        **_client_meta(request),
+    )
+    return {"status": "ok"}
 
 
 @router.get("/me")

@@ -37,24 +37,34 @@ def create_access_token(user_id: int, email: str) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
 
 
-def create_refresh_token(user_id: int, email: str) -> str:
+def create_refresh_token(
+    user_id: int,
+    email: str,
+    jti: str | None = None,
+    expires_at: datetime | None = None,
+) -> str:
+    now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
         "email": email,
         "type": "refresh",
-        "iat": datetime.now(timezone.utc),
-        "exp": datetime.now(timezone.utc) + timedelta(days=JWT_REFRESH_EXPIRATION_DAYS),
-        "jti": secrets.token_urlsafe(32),
+        "iat": now,
+        "exp": expires_at or now + timedelta(days=JWT_REFRESH_EXPIRATION_DAYS),
+        "jti": jti or secrets.token_urlsafe(32),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
 
 
 def create_token_pair(user_id: int, email: str) -> dict:
+    jti = secrets.token_urlsafe(32)
+    refresh_expires_at = datetime.now(timezone.utc) + timedelta(days=JWT_REFRESH_EXPIRATION_DAYS)
     return {
         "access_token": create_access_token(user_id, email),
-        "refresh_token": create_refresh_token(user_id, email),
+        "refresh_token": create_refresh_token(user_id, email, jti=jti, expires_at=refresh_expires_at),
         "token_type": "bearer",
         "expires_in": JWT_EXPIRATION_HOURS * 3600,
+        "jti": jti,
+        "refresh_expires_at": refresh_expires_at,
     }
 
 
