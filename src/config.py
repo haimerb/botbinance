@@ -11,6 +11,20 @@ DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 BINANCE_BASE_URL = "https://testnet.binance.vision" if USE_TESTNET else "https://api.binance.com"
 BINANCE_WS_URL = "wss://testnet.binance.vision/ws" if USE_TESTNET else "wss://stream.binance.com:9443/ws"
 
+BINANCE_FUTURES_BASE_URL = (
+    "https://testnet.binancefuture.com" if USE_TESTNET else "https://fapi.binance.com"
+)
+
+FUNDING_ENABLED = os.getenv("FUNDING_ENABLED", "false").lower() == "true"
+FUNDING_MIN_ANNUAL_PCT = float(os.getenv("FUNDING_MIN_ANNUAL_PCT", "8.0"))
+FUNDING_NOTIONAL_USDT = float(os.getenv("FUNDING_NOTIONAL_USDT", "100"))
+FUNDING_LEVERAGE = int(os.getenv("FUNDING_LEVERAGE", "1"))
+FUNDING_EXIT_IF_NEGATIVE = os.getenv("FUNDING_EXIT_IF_NEGATIVE", "true").lower() == "true"
+FUNDING_SYMBOLS = [
+    s.strip() for s in os.getenv("FUNDING_SYMBOLS", "BTCUSDT,ETHUSDT,SOLUSDT").split(",")
+    if s.strip()
+]
+
 DEFAULT_SYMBOLS = ["BTCUSDT"]
 INTERVAL = "1h"
 LOOKBACK_LIMIT = 500
