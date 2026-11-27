@@ -6,6 +6,7 @@ import PriceChart from './PriceChart'
 import TradingViewChart from './TradingViewChart'
 import NotificationBanner from './NotificationBanner'
 import TradeTable from './TradeTable'
+import FundingPanel from './FundingPanel'
 
 function Dashboard({ user, onLogout, onAccount }) {
   const [state, setState] = useState(null)
@@ -20,6 +21,8 @@ function Dashboard({ user, onLogout, onAccount }) {
   const [keyError, setKeyError] = useState('')
   const [keyLoading, setKeyLoading] = useState(false)
   const [notification, setNotification] = useState(null)
+  const [funding, setFunding] = useState(null)
+  const [fundingError, setFundingError] = useState('')
   const lastTradeIdRef = useRef(0)
   const priceHistoryRef = useRef({})
   const notifTimeoutRef = useRef(null)
@@ -41,6 +44,7 @@ function Dashboard({ user, onLogout, onAccount }) {
       })
       setPriceHistory({ ...hist })
     }
+    if (data?.funding) setFunding(data.funding)
   }, [])
 
   const fetchTradesAndStats = useCallback(async () => {
@@ -73,12 +77,23 @@ function Dashboard({ user, onLogout, onAccount }) {
     } catch (e) { console.error('Error fetching trades/stats:', e) }
   }, [tradeLimit, activeSymbol, state])
 
+  const fetchFunding = useCallback(async () => {
+    try {
+      setFunding(await api.getFundingStatus())
+      setFundingError('')
+    } catch (e) { setFundingError(e.message) }
+  }, [])
+
   useEffect(() => {
     api.connectWs(handleWsUpdate)
     fetchTradesAndStats()
-    const interval = setInterval(fetchTradesAndStats, 5000)
+    fetchFunding()
+    const interval = setInterval(() => {
+      fetchTradesAndStats()
+      fetchFunding()
+    }, 5000)
     return () => { api.disconnectWs(handleWsUpdate); clearInterval(interval) }
-  }, [handleWsUpdate, fetchTradesAndStats])
+  }, [handleWsUpdate, fetchTradesAndStats, fetchFunding])
 
   useEffect(() => {
     if (state?.symbols?.length && activeSymbol && !state.symbols.includes(activeSymbol)) {
@@ -91,6 +106,13 @@ function Dashboard({ user, onLogout, onAccount }) {
   }
   const handleStop = async () => {
     try { await api.stopBot(); fetchTradesAndStats() } catch (e) { setNotification({ type: 'error', message: e.message }); notifTimeoutRef.current = setTimeout(() => setNotification(null), 5000) }
+  }
+
+  const handleFundingStart = async () => {
+    try { await api.startFunding(); fetchFunding() } catch (e) { setFundingError(e.message) }
+  }
+  const handleFundingStop = async () => {
+    try { await api.stopFunding(); fetchFunding() } catch (e) { setFundingError(e.message) }
   }
 
   const handleSaveKeys = async (e) => {
@@ -358,6 +380,13 @@ function Dashboard({ user, onLogout, onAccount }) {
           </div>
         </div>
       )}
+
+      <FundingPanel
+        funding={funding}
+        error={fundingError}
+        onStart={handleFundingStart}
+        onStop={handleFundingStop}
+      />
 
       <div className="section glass">
         <div className="section-header">

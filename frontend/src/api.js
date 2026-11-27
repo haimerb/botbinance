@@ -98,6 +98,18 @@ export function getRecentTrades(sinceId = 0) {
   return request(`/trades/recent?since_id=${sinceId}`)
 }
 
+export function getFundingStatus() {
+  return request('/funding/status')
+}
+
+export function startFunding() {
+  return request('/funding/start', { method: 'POST' })
+}
+
+export function stopFunding() {
+  return request('/funding/stop', { method: 'POST' })
+}
+
 export function getKlines(symbol = 'BTCUSDT', interval = '1h', limit = 200) {
   return request(`/market/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`)
 }
