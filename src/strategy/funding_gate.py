@@ -58,7 +58,8 @@ class FundingGate:
     def __init__(self, *, min_intervals: int = 3, min_rate: float = 0.0,
                  min_net_annual_pct: float = 0.0, max_zscore: float = 2.5,
                  max_abs_basis_pct: float = 0.5, history_window: int = 30,
-                 calendar: Optional[EconomicCalendar] = None):
+                 calendar: Optional[EconomicCalendar] = None,
+                 persistence_model=None, min_persistence_prob: float = 0.0):
         self.min_intervals = min_intervals
         self.min_rate = min_rate
         self.min_net_annual_pct = min_net_annual_pct
@@ -66,6 +67,8 @@ class FundingGate:
         self.max_abs_basis_pct = max_abs_basis_pct
         self.history_window = history_window
         self.calendar = calendar or EconomicCalendar()
+        self.persistence_model = persistence_model
+        self.min_persistence_prob = min_persistence_prob
 
     def evaluate(self, candidate: FundingCandidate, history: list) -> FundingDecision:
         rate = candidate.funding_rate
@@ -96,6 +99,19 @@ class FundingGate:
             return FundingDecision(candidate.symbol, False,
                                    f"evento_{event.lower()}", -math.inf)
 
+        persistence = None
+        if self.persistence_model is not None and self.min_persistence_prob > 0:
+            persistence = self.persistence_model.predict(
+                candidate.symbol, rate, recent
+            )
+            if (persistence is not None and
+                    persistence < self.min_persistence_prob):
+                return FundingDecision(
+                    candidate.symbol, False, "persistencia_baja", -math.inf
+                )
+
         risk = statistics.pstdev(recent) * 10_000 if len(recent) >= 2 else 0.0
         score = candidate.net_annual_pct / (1 + risk)
+        if persistence is not None:
+            score *= persistence
         return FundingDecision(candidate.symbol, True, "ok", score)

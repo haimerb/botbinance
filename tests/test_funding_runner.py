@@ -2,7 +2,7 @@ import pytest
 
 from backend.services.funding_runner import FundingRunner
 from src.execution.funding_executor import FundingPosition
-from src.strategy.funding_gate import FundingDecision
+from src.strategy.funding_gate import FundingDecision, FundingGate
 
 
 class FakeOpp:
@@ -206,6 +206,17 @@ def test_runner_requests_maker_entry_from_executor():
     assert executor.open_kwargs[0]["maker"] is True
     assert "maker_timeout" in executor.open_kwargs[0]
     assert runner.get_state()["execution"]["maker"] is True
+
+
+def test_runner_trains_persistence_model_from_history():
+    gate = FundingGate(min_persistence_prob=0.6)
+    runner = _runner(
+        FakeScanner([FakeOpp()]), FakeExecutor(), FakeFutures(),
+        gate=gate, history_client=FakeHistory(),
+    )
+    runner.tick()
+    assert gate.persistence_model is not None
+    assert runner.get_state()["gate"]["persistence_trained"] is True
 
 
 def test_accounting_separates_funding_basis_and_fees():
