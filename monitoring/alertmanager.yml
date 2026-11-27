@@ -20,6 +20,8 @@ receivers:
   - name: 'default'
     webhook_configs:
       - url: 'http://backend:8000/api/alerts/webhook'
+        http_config:
+          bearer_token_file: /tmp/webhook_token
         send_resolved: true
 
 inhibit_rules:
