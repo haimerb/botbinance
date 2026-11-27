@@ -20,6 +20,15 @@ export default function App() {
     }
   }, [])
 
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setAuthed(false)
+      setUser(null)
+    }
+    window.addEventListener('auth:unauthorized', handleUnauthorized)
+    return () => window.removeEventListener('auth:unauthorized', handleUnauthorized)
+  }, [])
+
   const handleAuth = (res) => {
     setUser({ email: res.email, ...res })
     setAuthed(true)
