@@ -188,6 +188,9 @@ def test_gate_rejects_all_opportunities():
     assert state["position"] is None
     assert state["opportunities"][0]["gate_allowed"] is False
     assert state["opportunities"][0]["gate_reason"] == "funding_extremo"
+    assert state["opportunities"][0]["liquidation_pressure"] == 0.0
+    assert state["gate"]["liquidation_enabled"] is True
+    assert state["gate"]["max_liquidation_pressure"] == 0.85
 
 
 def test_gate_ranks_by_score_instead_of_scanner_order():

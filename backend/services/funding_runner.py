@@ -9,10 +9,13 @@ from src.config import (
     FUNDING_HISTORY_BASE_URL,
     FUNDING_HISTORY_WINDOW,
     FUNDING_LEVERAGE,
+    FUNDING_LIQUIDATION_PRESSURE_ENABLED,
+    FUNDING_LIQUIDATION_TARGET_RATE,
     FUNDING_MAKER_FEE,
     FUNDING_MAKER_PRICE_OFFSET,
     FUNDING_MAKER_TIMEOUT_SECONDS,
     FUNDING_MAX_BASIS_PCT,
+    FUNDING_MAX_LIQUIDATION_PRESSURE,
     FUNDING_MAX_ZSCORE,
     FUNDING_MIN_ANNUAL_PCT,
     FUNDING_MIN_FALLBACK_ANNUAL_PCT,
@@ -72,6 +75,8 @@ class FundingRunner:
                 "max_zscore": FUNDING_MAX_ZSCORE,
                 "max_abs_basis_pct": FUNDING_MAX_BASIS_PCT,
                 "blackout_minutes": FUNDING_EVENT_BLACKOUT_MINUTES,
+                "liquidation_enabled": FUNDING_LIQUIDATION_PRESSURE_ENABLED,
+                "max_liquidation_pressure": FUNDING_MAX_LIQUIDATION_PRESSURE,
                 "persistence_enabled": FUNDING_USE_PERSISTENCE,
                 "min_persistence_prob": FUNDING_MIN_PERSISTENCE_PROB,
                 "persistence_trained": False,
@@ -124,6 +129,9 @@ class FundingRunner:
             min_persistence_prob=(
                 FUNDING_MIN_PERSISTENCE_PROB if FUNDING_USE_PERSISTENCE else 0.0
             ),
+            liquidation_enabled=FUNDING_LIQUIDATION_PRESSURE_ENABLED,
+            max_liquidation_pressure=FUNDING_MAX_LIQUIDATION_PRESSURE,
+            liquidation_target_rate=FUNDING_LIQUIDATION_TARGET_RATE,
         )
         with self._lock:
             self.state["gate"]["enabled"] = True
@@ -225,6 +233,7 @@ class FundingRunner:
                 "basis_pct": opportunity.basis_pct,
                 "gate_allowed": decision.allowed,
                 "gate_reason": decision.reason,
+                "liquidation_pressure": decision.liquidation_pressure,
                 "score": round(decision.score, 4),
             })
             if decision.allowed:
