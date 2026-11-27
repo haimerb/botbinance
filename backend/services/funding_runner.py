@@ -2,6 +2,13 @@ import copy
 import threading
 import time
 
+from backend.services.metrics import (
+    record_funding_cycle,
+    record_funding_decision,
+    record_funding_error,
+    record_funding_position,
+    update_funding_metrics,
+)
 from src.config import (
     FUNDING_ENABLED,
     FUNDING_EVENT_BLACKOUT_MINUTES,
@@ -163,14 +170,18 @@ class FundingRunner:
         with self._lock:
             self.state["cycles"] += 1
             self.state["last_error"] = None
+        record_funding_cycle()
         try:
             if self.state["position"] is not None:
                 self._maybe_close(self.state["position"])
             else:
                 self._maybe_open()
         except Exception as exc:
+            record_funding_error()
             with self._lock:
                 self.state["last_error"] = str(exc)
+        finally:
+            update_funding_metrics(self.get_state())
 
     def _maybe_close(self, position):
         rate = self._current_rate(position["symbol"])
@@ -179,6 +190,7 @@ class FundingRunner:
         result = self._executor.close(self._position_obj(position))
         with self._lock:
             if result.ok:
+                record_funding_position(position["symbol"], opened=False)
                 opened = position.get("opened_at", time.time())
                 intervals = max(
                     1,
@@ -225,6 +237,9 @@ class FundingRunner:
                     "sin_gate",
                     candidate.net_annual_pct,
                 )
+            record_funding_decision(
+                opportunity.symbol, decision.allowed, decision.reason
+            )
             enriched.append({
                 "symbol": opportunity.symbol,
                 "funding_rate": opportunity.funding_rate,
@@ -257,6 +272,7 @@ class FundingRunner:
             min_fallback_annual_pct=FUNDING_MIN_FALLBACK_ANNUAL_PCT,
         )
         if result.ok and result.position is not None:
+            record_funding_position(result.position.symbol, opened=True)
             basis_cost = max(best.basis_pct or 0, 0) / 100 * FUNDING_NOTIONAL_USDT
             entry_fee = (
                 FUNDING_MAKER_FEE if FUNDING_USE_MAKER else FUNDING_TAKER_FEE
@@ -346,15 +362,18 @@ class FundingRunner:
         self.running = True
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
+        update_funding_metrics(self.get_state())
 
     def stop(self):
         self.running = False
         with self._lock:
             self.state["status"] = "stopped"
+        update_funding_metrics(self.get_state())
 
     def _run_loop(self):
         with self._lock:
             self.state["status"] = "running"
+        update_funding_metrics(self.get_state())
         while self.running:
             self.tick()
             time.sleep(self.poll_interval)

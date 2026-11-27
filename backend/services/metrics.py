@@ -178,6 +178,76 @@ RISK_TAKE_PROFIT_DISTANCE = Gauge(
     ['symbol']
 )
 
+# Funding metrics
+FUNDING_RUNNING = Gauge(
+    'botbinance_funding_running',
+    'Funding runner activo (1=running, 0=stopped)'
+)
+
+FUNDING_CYCLES = Counter(
+    'botbinance_funding_cycles_total',
+    'Ciclos del funding runner'
+)
+
+FUNDING_OPPORTUNITIES = Gauge(
+    'botbinance_funding_opportunities',
+    'Oportunidades de funding del último scan'
+)
+
+FUNDING_DECISIONS = Counter(
+    'botbinance_funding_decisions_total',
+    'Decisiones del gate de funding',
+    ['symbol', 'result', 'reason']
+)
+
+FUNDING_ERRORS = Counter(
+    'botbinance_funding_errors_total',
+    'Errores del funding runner'
+)
+
+FUNDING_POSITIONS_OPENED = Counter(
+    'botbinance_funding_positions_opened_total',
+    'Posiciones de funding abiertas',
+    ['symbol']
+)
+
+FUNDING_POSITIONS_CLOSED = Counter(
+    'botbinance_funding_positions_closed_total',
+    'Posiciones de funding cerradas',
+    ['symbol']
+)
+
+FUNDING_POSITION_ACTIVE = Gauge(
+    'botbinance_funding_position_active',
+    'Posición de funding abierta (1=sí, 0=no)'
+)
+
+FUNDING_POSITION_HEDGED = Gauge(
+    'botbinance_funding_position_hedged',
+    'Posición de funding con cobertura spot+perp (1=sí, 0=no)'
+)
+
+FUNDING_NET_PNL = Gauge(
+    'botbinance_funding_net_pnl_usd',
+    'P&L neto acumulado del funding en USD'
+)
+
+FUNDING_PERSISTENCE_ENABLED = Gauge(
+    'botbinance_funding_persistence_enabled',
+    'Persistencia de funding habilitada (1=sí, 0=no)'
+)
+
+FUNDING_PERSISTENCE_TRAINED = Gauge(
+    'botbinance_funding_persistence_trained',
+    'Modelo de persistencia entrenado (1=sí, 0=no)'
+)
+
+FUNDING_LIQUIDATION_PRESSURE = Gauge(
+    'botbinance_funding_liquidation_pressure',
+    'Presión de liquidaciones por símbolo',
+    ['symbol']
+)
+
 
 def update_bot_status(status: str):
     """Update bot status gauge."""
@@ -258,6 +328,55 @@ def update_risk_metrics(symbol: str, position_usd: float, sl_pct: float, tp_pct:
     RISK_POSITION_SIZE.labels(symbol=symbol).set(position_usd)
     RISK_STOP_LOSS_DISTANCE.labels(symbol=symbol).set(sl_pct)
     RISK_TAKE_PROFIT_DISTANCE.labels(symbol=symbol).set(tp_pct)
+
+
+def record_funding_cycle():
+    """Registra un ciclo del funding runner."""
+    FUNDING_CYCLES.inc()
+
+
+def record_funding_decision(symbol: str, allowed: bool, reason: str):
+    """Registra una decisión del gate de funding."""
+    FUNDING_DECISIONS.labels(
+        symbol=symbol,
+        result="allowed" if allowed else "rejected",
+        reason=reason,
+    ).inc()
+
+
+def record_funding_error():
+    """Registra un error del funding runner."""
+    FUNDING_ERRORS.inc()
+
+
+def record_funding_position(symbol: str, *, opened: bool):
+    """Registra una apertura o cierre de posición de funding."""
+    counter = FUNDING_POSITIONS_OPENED if opened else FUNDING_POSITIONS_CLOSED
+    counter.labels(symbol=symbol).inc()
+
+
+def update_funding_metrics(state: dict):
+    """Actualiza las gauges del funding runner desde su estado."""
+    position = state.get("position") or {}
+    gate = state.get("gate") or {}
+    accounting = state.get("accounting") or {}
+    FUNDING_RUNNING.set(1 if state.get("status") == "running" else 0)
+    FUNDING_OPPORTUNITIES.set(len(state.get("opportunities") or []))
+    FUNDING_POSITION_ACTIVE.set(1 if position else 0)
+    FUNDING_POSITION_HEDGED.set(1 if position.get("is_hedged") else 0)
+    FUNDING_NET_PNL.set(float(accounting.get("net", 0) or 0))
+    FUNDING_PERSISTENCE_ENABLED.set(
+        1 if gate.get("persistence_enabled") else 0
+    )
+    FUNDING_PERSISTENCE_TRAINED.set(
+        1 if gate.get("persistence_trained") else 0
+    )
+    for opportunity in state.get("opportunities") or []:
+        pressure = opportunity.get("liquidation_pressure")
+        if pressure is not None:
+            FUNDING_LIQUIDATION_PRESSURE.labels(
+                symbol=opportunity.get("symbol", "unknown")
+            ).set(float(pressure))
 
 
 def metrics_endpoint():
