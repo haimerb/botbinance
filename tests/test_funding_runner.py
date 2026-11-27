@@ -2,15 +2,16 @@ import pytest
 
 from backend.services.funding_runner import FundingRunner
 from src.execution.funding_executor import FundingPosition
+from src.strategy.funding_gate import FundingDecision
 
 
 class FakeOpp:
-    def __init__(self, symbol="BTCUSDT", rate=0.0001):
+    def __init__(self, symbol="BTCUSDT", rate=0.0001, basis_pct=-0.02):
         self.symbol = symbol
         self.funding_rate = rate
         self.annual_pct = rate * 3 * 365 * 100
         self.annual_net_pct = self.annual_pct - 5
-        self.basis_pct = -0.02
+        self.basis_pct = basis_pct
         self.mark_price = 60000.0
 
 
@@ -53,9 +54,29 @@ class FakeFutures:
         return {"lastFundingRate": str(self.rate)}
 
 
-def _runner(scanner, executor, futures):
+class FakeGate:
+    def __init__(self, scores):
+        self.scores = scores
+
+    def evaluate(self, candidate, history):
+        allowed, reason, score = self.scores.get(
+            candidate.symbol, (True, "ok", candidate.net_annual_pct)
+        )
+        return FundingDecision(candidate.symbol, allowed, reason, score)
+
+
+class FakeHistory:
+    def __init__(self, rates=None):
+        self.rates = rates or [0.0001] * 10
+
+    def funding(self, symbol, limit=100):
+        return [{"fundingRate": str(r)} for r in self.rates[:limit]]
+
+
+def _runner(scanner, executor, futures, *, gate=None, history_client=None):
     r = FundingRunner(dry_run=True)
-    r.inject(scanner=scanner, executor=executor)
+    r.inject(scanner=scanner, executor=executor, gate=gate,
+             history_client=history_client)
     r._futures_client = futures
     r._symbols = ["BTCUSDT"]
     return r
@@ -147,3 +168,45 @@ def test_stop_sets_status_without_touching_position():
     state = runner.get_state()
     assert state["status"] == "stopped"
     assert state["position"] is not None
+
+
+def test_gate_rejects_all_opportunities():
+    gate = FakeGate({"BTCUSDT": (False, "funding_extremo", -1)})
+    runner = _runner(
+        FakeScanner([FakeOpp()]), FakeExecutor(), FakeFutures(),
+        gate=gate, history_client=FakeHistory(),
+    )
+    runner.tick()
+    state = runner.get_state()
+    assert state["position"] is None
+    assert state["opportunities"][0]["gate_allowed"] is False
+    assert state["opportunities"][0]["gate_reason"] == "funding_extremo"
+
+
+def test_gate_ranks_by_score_instead_of_scanner_order():
+    gate = FakeGate({
+        "BTCUSDT": (True, "ok", 4.0),
+        "ETHUSDT": (True, "ok", 15.0),
+    })
+    scanner = FakeScanner([FakeOpp("BTCUSDT"), FakeOpp("ETHUSDT", 0.0003)])
+    runner = _runner(
+        scanner, FakeExecutor(), FakeFutures(),
+        gate=gate, history_client=FakeHistory(),
+    )
+    runner.tick()
+    assert runner.get_state()["position"]["symbol"] == "ETHUSDT"
+
+
+def test_accounting_separates_funding_basis_and_fees():
+    futures = FakeFutures(rate=0.0001)
+    runner = _runner(FakeScanner([FakeOpp(basis_pct=0.5)]), FakeExecutor(), futures)
+    runner.tick()
+    with runner._lock:
+        runner.state["position"]["opened_at"] -= 8 * 3600
+    futures.rate = -0.0001
+    runner.tick()
+    accounting = runner.get_state()["accounting"]
+    assert accounting["funding"] > 0
+    assert accounting["fees"] > 0
+    assert accounting["basis"] < 0
+    assert accounting["net"] < accounting["funding"]

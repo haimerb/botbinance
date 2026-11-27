@@ -4,17 +4,34 @@ import time
 
 from src.config import (
     FUNDING_ENABLED,
+    FUNDING_EVENT_BLACKOUT_MINUTES,
     FUNDING_EXIT_IF_NEGATIVE,
+    FUNDING_HISTORY_BASE_URL,
+    FUNDING_HISTORY_WINDOW,
     FUNDING_LEVERAGE,
+    FUNDING_MAX_BASIS_PCT,
+    FUNDING_MAX_ZSCORE,
     FUNDING_MIN_ANNUAL_PCT,
+    FUNDING_MIN_INTERVALS,
     FUNDING_NOTIONAL_USDT,
     FUNDING_SYMBOLS,
+    FUNDING_TAKER_FEE,
 )
 from src.data.binance_futures_client import BinanceFuturesClient
+from src.data.funding_history import FundingHistoryClient
 from src.execution.funding_executor import FundingExecutor
 from src.execution.trade_executor import TradeExecutor
+from src.strategy.event_calendar import EconomicCalendar
 from src.strategy.funding_arbitrage import should_close
+from src.strategy.funding_gate import (
+    FundingCandidate,
+    FundingDecision,
+    FundingGate,
+    rank_candidates,
+)
 from src.strategy.funding_scanner import FundingScanner
+
+FUNDING_INTERVAL_MS = 8 * 3_600_000
 
 
 class FundingRunner:
@@ -39,11 +56,26 @@ class FundingRunner:
             "last_scan": None,
             "last_error": None,
             "cycles": 0,
+            "gate": {
+                "enabled": False,
+                "min_intervals": FUNDING_MIN_INTERVALS,
+                "max_zscore": FUNDING_MAX_ZSCORE,
+                "max_abs_basis_pct": FUNDING_MAX_BASIS_PCT,
+                "blackout_minutes": FUNDING_EVENT_BLACKOUT_MINUTES,
+            },
+            "accounting": {
+                "funding": 0.0,
+                "basis": 0.0,
+                "fees": 0.0,
+                "net": 0.0,
+            },
         }
         self._executor = None
         self._scanner = None
         self._futures_client = None
         self._spot_executor = None
+        self._history_client = None
+        self._gate = None
 
     def configure(self, *, api_key=None, api_secret=None, symbols=None):
         """Construye dependencias con credenciales del usuario."""
@@ -59,6 +91,20 @@ class FundingRunner:
             min_annual_pct=FUNDING_MIN_ANNUAL_PCT,
             hold_days=30.0,
         )
+        self._history_client = FundingHistoryClient(
+            BinanceFuturesClient(base_url=FUNDING_HISTORY_BASE_URL)
+        )
+        self._gate = FundingGate(
+            min_intervals=FUNDING_MIN_INTERVALS,
+            max_zscore=FUNDING_MAX_ZSCORE,
+            max_abs_basis_pct=FUNDING_MAX_BASIS_PCT,
+            history_window=FUNDING_HISTORY_WINDOW,
+            calendar=EconomicCalendar(
+                blackout_minutes=FUNDING_EVENT_BLACKOUT_MINUTES
+            ),
+        )
+        with self._lock:
+            self.state["gate"]["enabled"] = True
         self._symbols = list(symbols or FUNDING_SYMBOLS)
         if FUNDING_LEVERAGE > 1:
             for symbol in self._symbols:
@@ -67,12 +113,19 @@ class FundingRunner:
                 except Exception:
                     pass
 
-    def inject(self, *, scanner=None, executor=None):
+    def inject(self, *, scanner=None, executor=None, gate=None,
+               history_client=None):
         """Inyección directa para tests."""
         if scanner is not None:
             self._scanner = scanner
         if executor is not None:
             self._executor = executor
+        if gate is not None:
+            self._gate = gate
+            with self._lock:
+                self.state["gate"]["enabled"] = True
+        if history_client is not None:
+            self._history_client = history_client
         self._symbols = list(FUNDING_SYMBOLS)
 
     def tick(self):
@@ -96,34 +149,85 @@ class FundingRunner:
         result = self._executor.close(self._position_obj(position))
         with self._lock:
             if result.ok:
+                opened = position.get("opened_at", time.time())
+                intervals = max(
+                    1,
+                    round((time.time() - opened) * 1000 / FUNDING_INTERVAL_MS),
+                )
+                accounting = self.state["accounting"]
+                accounting["funding"] += (
+                    position.get("funding_rate", 0)
+                    * FUNDING_NOTIONAL_USDT * intervals
+                )
+                accounting["fees"] += FUNDING_TAKER_FEE * FUNDING_NOTIONAL_USDT
+                self._recalculate_net()
                 self.state["position"] = None
             else:
                 self.state["last_error"] = result.error
 
     def _maybe_open(self):
         opportunities = self._scanner.scan(self._symbols)
-        with self._lock:
-            self.state["opportunities"] = [
-                {
-                    "symbol": o.symbol,
-                    "funding_rate": o.funding_rate,
-                    "annual_pct": o.annual_pct,
-                    "annual_net_pct": o.annual_net_pct,
-                    "basis_pct": o.basis_pct,
-                }
-                for o in opportunities
-            ]
-            self.state["last_scan"] = time.time()
         if not opportunities:
+            with self._lock:
+                self.state["opportunities"] = []
+                self.state["last_scan"] = time.time()
             return
-        best = opportunities[0]
+
+        by_symbol = {o.symbol: o for o in opportunities}
+        decisions = []
+        enriched = []
+        for opportunity in opportunities:
+            history = self._funding_history(opportunity.symbol)
+            candidate = FundingCandidate(
+                symbol=opportunity.symbol,
+                funding_rate=opportunity.funding_rate,
+                net_annual_pct=opportunity.annual_net_pct,
+                funding_time=int(time.time() * 1000),
+                basis_pct=opportunity.basis_pct,
+            )
+            if self._gate is not None:
+                decision = self._gate.evaluate(candidate, history)
+            else:
+                decision = FundingDecision(
+                    opportunity.symbol,
+                    candidate.funding_rate > 0,
+                    "sin_gate",
+                    candidate.net_annual_pct,
+                )
+            enriched.append({
+                "symbol": opportunity.symbol,
+                "funding_rate": opportunity.funding_rate,
+                "annual_pct": opportunity.annual_pct,
+                "annual_net_pct": opportunity.annual_net_pct,
+                "basis_pct": opportunity.basis_pct,
+                "gate_allowed": decision.allowed,
+                "gate_reason": decision.reason,
+                "score": round(decision.score, 4),
+            })
+            if decision.allowed:
+                decisions.append(decision)
+
+        with self._lock:
+            self.state["opportunities"] = enriched
+            self.state["last_scan"] = time.time()
+
+        ranked = rank_candidates(decisions)
+        if not ranked:
+            return
+        best = by_symbol[ranked[0].symbol]
         quantity = FUNDING_NOTIONAL_USDT / best.mark_price if best.mark_price else 0
         result = self._executor.open(
             best.symbol, quantity, best.funding_rate,
             mark_price=best.mark_price or 0,
         )
         if result.ok and result.position is not None:
+            basis_cost = max(best.basis_pct or 0, 0) / 100 * FUNDING_NOTIONAL_USDT
+            entry_fee = FUNDING_TAKER_FEE * FUNDING_NOTIONAL_USDT
             with self._lock:
+                accounting = self.state["accounting"]
+                accounting["basis"] -= basis_cost
+                accounting["fees"] += entry_fee
+                self._recalculate_net()
                 self.state["position"] = {
                     "symbol": result.position.symbol,
                     "quantity": result.position.quantity,
@@ -131,10 +235,28 @@ class FundingRunner:
                     "funding_rate": result.position.funding_rate,
                     "is_hedged": result.position.is_hedged,
                     "opened_at": time.time(),
+                    "basis_cost": basis_cost,
+                    "entry_fee": entry_fee,
                 }
         elif not result.ok:
             with self._lock:
                 self.state["last_error"] = result.error
+
+    def _funding_history(self, symbol):
+        if self._history_client is None:
+            return []
+        limit = max(FUNDING_HISTORY_WINDOW + FUNDING_MIN_INTERVALS, 30)
+        try:
+            rows = self._history_client.funding(symbol, limit=limit)
+        except Exception:
+            return []
+        return [float(row["fundingRate"]) for row in rows]
+
+    def _recalculate_net(self):
+        accounting = self.state["accounting"]
+        accounting["net"] = round(
+            accounting["funding"] + accounting["basis"] - accounting["fees"], 4
+        )
 
     def _current_rate(self, symbol):
         data = self._futures_client.mark_price(symbol)
