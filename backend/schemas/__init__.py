@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class RegisterRequest(BaseModel):
@@ -14,6 +14,28 @@ class LoginRequest(BaseModel):
 
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
+
+
+class AlertmanagerLabels(BaseModel):
+    alertname: str
+    severity: str = "info"
+
+
+class AlertmanagerAnnotations(BaseModel):
+    summary: str | None = None
+    description: str | None = None
+
+
+class AlertmanagerAlert(BaseModel):
+    status: str | None = None
+    labels: AlertmanagerLabels
+    annotations: AlertmanagerAnnotations = Field(default_factory=AlertmanagerAnnotations)
+    fingerprint: str | None = None
+    startsAt: str | None = None
+
+
+class AlertmanagerWebhookPayload(BaseModel):
+    alerts: list[AlertmanagerAlert] = Field(default_factory=list)
 
 
 class BinanceKeysRequest(BaseModel):

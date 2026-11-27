@@ -56,16 +56,20 @@ services:
     image: prom/alertmanager:v0.27.0
     container_name: botbinance-alertmanager
     user: "65534:65534"
+    environment:
+      - ALERT_WEBHOOK_TOKEN=${ALERT_WEBHOOK_TOKEN:-}
     volumes:
       - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager-data:/alertmanager
+    entrypoint: /bin/sh
     command:
-      - '--config.file=/etc/alertmanager/alertmanager.yml'
-      - '--storage.path=/alertmanager'
+      - -c
+      - 'printf %s "$${ALERT_WEBHOOK_TOKEN}" > /tmp/webhook_token && exec /bin/alertmanager --config.file=/etc/alertmanager/alertmanager.yml --storage.path=/alertmanager'
     ports:
       - "9093:9093"
     networks:
       - monitoring-network
+      - botbinance_backend-network
     restart: unless-stopped
 
   node-exporter:

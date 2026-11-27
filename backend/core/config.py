@@ -10,6 +10,7 @@ from src.config import FUNDING_POLL_SECONDS
 MOCK_MODE = os.getenv("MOCK_MODE", "true").lower() == "true"
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+ALERT_WEBHOOK_TOKEN = os.getenv("ALERT_WEBHOOK_TOKEN", "")
 
 ALLOWED_ORIGINS = os.getenv(
     "ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:8000"
