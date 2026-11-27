@@ -1,3 +1,6 @@
+import json
+import math
+
 import pytest
 from prometheus_client import REGISTRY
 
@@ -317,3 +320,29 @@ def test_funding_metrics_read_state_and_decisions():
         )
         == rejected_before + 1
     )
+
+
+def test_score_no_finito_no_rompe_estado_json():
+    gate = FakeGate({"BTCUSDT": (False, "neto_insuficiente", -math.inf)})
+    runner = _runner(
+        FakeScanner([FakeOpp()]),
+        FakeExecutor(),
+        FakeFutures(),
+        gate=gate,
+        history_client=FakeHistory(),
+    )
+    runner.tick()
+    state = runner.get_state()
+    assert state["opportunities"][0]["score"] is None
+    json.dumps(state, allow_nan=False)
+
+
+def test_get_state_sanea_valores_no_finitos_anidados():
+    runner = FundingRunner(dry_run=True)
+    runner.state["opportunities"] = [
+        {"symbol": "BTCUSDT", "annual_net_pct": math.nan, "score": math.inf}
+    ]
+    state = runner.get_state()
+    assert state["opportunities"][0]["annual_net_pct"] is None
+    assert state["opportunities"][0]["score"] is None
+    json.dumps(state, allow_nan=False)

@@ -1,4 +1,5 @@
 import copy
+import math
 import threading
 import time
 
@@ -52,6 +53,16 @@ from src.strategy.funding_persistence import FundingPersistenceModel
 from src.strategy.funding_scanner import FundingScanner
 
 FUNDING_INTERVAL_MS = 8 * 3_600_000
+
+
+def _json_safe(value):
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 class FundingRunner:
@@ -249,7 +260,9 @@ class FundingRunner:
                 "gate_allowed": decision.allowed,
                 "gate_reason": decision.reason,
                 "liquidation_pressure": decision.liquidation_pressure,
-                "score": round(decision.score, 4),
+                "score": (
+                    round(decision.score, 4) if math.isfinite(decision.score) else None
+                ),
             })
             if decision.allowed:
                 decisions.append(decision)
@@ -380,4 +393,4 @@ class FundingRunner:
 
     def get_state(self) -> dict:
         with self._lock:
-            return copy.deepcopy(self.state)
+            return _json_safe(copy.deepcopy(self.state))
