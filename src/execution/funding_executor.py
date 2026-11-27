@@ -130,8 +130,18 @@ class FundingExecutor:
 
         spot = self.spot_executor.execute_order("SELL", position.quantity, position.symbol)
         if not spot.ok:
+            rehedged = False
+            if perp_result and perp_result.ok and not self.dry_run:
+                try:
+                    self.futures_client.place_order(
+                        position.symbol, "SELL", position.quantity
+                    )
+                    rehedged = True
+                except Exception:
+                    pass
+            detail = "short reapertado" if rehedged else "short no reapertado"
             return FundingExecutionResult(
-                ok=False, error=f"Fallo cierre spot: {spot.error}",
+                ok=False, error=f"Fallo cierre spot: {spot.error}; {detail}",
                 spot_result=spot, perp_result=perp_result,
             )
         if perp_error:
@@ -162,6 +172,7 @@ class FundingExecutor:
                 ok=False, error=f"Fallo pata spot maker: {spot.error}",
                 spot_result=spot,
             )
+        spot.filled_qty = 0.0
 
         try:
             self._configure_margin(symbol)
@@ -182,10 +193,10 @@ class FundingExecutor:
             status=perp_raw.get("status", "NEW"),
             filled_qty=0.0, avg_price=perp_price,
         )
-        spot_filled, perp_filled = self._wait_maker_fills(
-            symbol, spot, perp, maker_timeout
+        spot_qty, perp_qty = self._wait_maker_fills(
+            symbol, quantity, spot, perp, maker_timeout
         )
-        if spot_filled and perp_filled:
+        if spot_qty >= quantity and perp_qty >= quantity:
             return FundingExecutionResult(
                 ok=True,
                 position=self._position(symbol, quantity, funding_rate, spot, perp, reference),
@@ -193,7 +204,7 @@ class FundingExecutor:
                 perp_result=perp,
             )
 
-        self._cancel_maker_rest(symbol, spot, perp, spot_filled, perp_filled)
+        self._cancel_maker_rest(symbol, quantity, spot, perp, spot_qty, perp_qty)
         if annualize_funding(funding_rate) < min_fallback_annual_pct:
             return FundingExecutionResult(
                 ok=False, error="Maker sin fill y edge insuficiente para fallback"
@@ -202,53 +213,66 @@ class FundingExecutor:
             symbol, quantity, funding_rate, reference, maker=False
         )
 
-    def _wait_maker_fills(self, symbol, spot, perp, timeout):
+    def _wait_maker_fills(self, symbol, quantity, spot, perp, timeout):
         deadline = time.time() + max(timeout, 0)
-        spot_filled = False
-        perp_filled = False
-        while time.time() < deadline:
-            spot_filled = self._spot_filled(symbol, spot)
-            perp_filled = self._perp_filled(symbol, perp)
-            if spot_filled and perp_filled:
+        spot_qty = 0.0
+        perp_qty = 0.0
+        while True:
+            spot_qty = self._spot_filled_qty(symbol, spot)
+            perp_qty = self._perp_filled_qty(symbol, perp)
+            if (spot_qty >= quantity and perp_qty >= quantity) or time.time() >= deadline:
                 break
-            time.sleep(min(0.5, max(deadline - time.time(), 0)))
-        return spot_filled, perp_filled
+            time.sleep(min(0.5, deadline - time.time()))
+        return spot_qty, perp_qty
 
-    def _spot_filled(self, symbol, spot):
+    @staticmethod
+    def _executed_qty(raw, order):
+        status = str(raw.get("status") or "").upper()
+        if status == "FILLED":
+            return order.quantity
+        value = raw.get("executedQty", raw.get("cumQty", raw.get("filled_qty")))
+        try:
+            return max(float(value or 0), 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _spot_filled_qty(self, symbol, spot):
         if spot.order_id is None:
-            return spot.status == "FILLED"
+            return spot.quantity if spot.status == "FILLED" else spot.filled_qty
         try:
-            status = self.spot_executor.query_order(symbol, spot.order_id).get("status")
+            raw = self.spot_executor.query_order(symbol, spot.order_id)
         except Exception:
-            status = None
-        return status in ("FILLED", "PARTIALLY_FILLED")
+            return spot.filled_qty
+        queried = self._executed_qty(raw, spot)
+        return queried if queried > 0 else spot.filled_qty
 
-    def _perp_filled(self, symbol, perp):
+    def _perp_filled_qty(self, symbol, perp):
         if perp.order_id is None:
-            return perp.status == "FILLED"
+            return perp.quantity if perp.status == "FILLED" else perp.filled_qty
         try:
-            status = self.futures_client.query_order(symbol, perp.order_id).get("status")
+            raw = self.futures_client.query_order(symbol, perp.order_id)
         except Exception:
-            status = None
-        return status in ("FILLED", "PARTIALLY_FILLED")
+            return perp.filled_qty
+        queried = self._executed_qty(raw, perp)
+        return queried if queried > 0 else perp.filled_qty
 
-    def _cancel_maker_rest(self, symbol, spot, perp, spot_filled, perp_filled):
-        if not spot_filled and spot.order_id is not None:
+    def _cancel_maker_rest(self, symbol, quantity, spot, perp, spot_qty, perp_qty):
+        if spot_qty < quantity and spot.order_id is not None:
             try:
                 self.spot_executor.cancel_order(symbol, spot.order_id)
             except Exception:
                 pass
-        if not perp_filled and perp.order_id is not None:
+        if perp_qty < quantity and perp.order_id is not None:
             try:
                 self.futures_client.cancel_order(symbol, perp.order_id)
             except Exception:
                 pass
-        if spot_filled and not perp_filled:
-            self._close_spot(symbol, spot.quantity)
-        if perp_filled and not spot_filled:
+        if spot_qty > 0:
+            self._close_spot(symbol, spot_qty)
+        if perp_qty > 0:
             try:
                 self.futures_client.place_order(
-                    symbol, "BUY", perp.quantity, reduceOnly=True
+                    symbol, "BUY", perp_qty, reduceOnly=True
                 )
             except Exception:
                 pass

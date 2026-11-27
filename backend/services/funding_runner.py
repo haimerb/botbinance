@@ -212,7 +212,7 @@ class FundingRunner:
                     position.get("funding_rate", 0)
                     * FUNDING_NOTIONAL_USDT * intervals
                 )
-                accounting["fees"] += FUNDING_TAKER_FEE * FUNDING_NOTIONAL_USDT
+                accounting["fees"] += 2 * FUNDING_TAKER_FEE * FUNDING_NOTIONAL_USDT
                 self._recalculate_net()
                 self.state["position"] = None
             else:
@@ -236,7 +236,7 @@ class FundingRunner:
                 symbol=opportunity.symbol,
                 funding_rate=opportunity.funding_rate,
                 net_annual_pct=opportunity.annual_net_pct,
-                funding_time=int(time.time() * 1000),
+                funding_time=opportunity.next_funding_time or int(time.time() * 1000),
                 basis_pct=opportunity.basis_pct,
             )
             if self._gate is not None:
@@ -287,7 +287,7 @@ class FundingRunner:
         if result.ok and result.position is not None:
             record_funding_position(result.position.symbol, opened=True)
             basis_cost = max(best.basis_pct or 0, 0) / 100 * FUNDING_NOTIONAL_USDT
-            entry_fee = (
+            entry_fee = 2 * (
                 FUNDING_MAKER_FEE if FUNDING_USE_MAKER else FUNDING_TAKER_FEE
             ) * FUNDING_NOTIONAL_USDT
             with self._lock:

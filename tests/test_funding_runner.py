@@ -9,6 +9,12 @@ from backend.services.metrics import (
     record_funding_decision,
     update_funding_metrics,
 )
+from src.config import (
+    FUNDING_MAKER_FEE,
+    FUNDING_NOTIONAL_USDT,
+    FUNDING_TAKER_FEE,
+    FUNDING_USE_MAKER,
+)
 from src.execution.funding_executor import FundingPosition
 from src.strategy.funding_gate import FundingDecision, FundingGate
 
@@ -21,6 +27,7 @@ class FakeOpp:
         self.annual_net_pct = self.annual_pct - 5
         self.basis_pct = basis_pct
         self.mark_price = 60000.0
+        self.next_funding_time = None
 
 
 class FakeScanner:
@@ -73,6 +80,16 @@ class FakeGate:
             candidate.symbol, (True, "ok", candidate.net_annual_pct)
         )
         return FundingDecision(candidate.symbol, allowed, reason, score)
+
+
+class RecordingGate(FakeGate):
+    def __init__(self, scores=None):
+        super().__init__(scores or {})
+        self.candidates = []
+
+    def evaluate(self, candidate, history):
+        self.candidates.append(candidate)
+        return super().evaluate(candidate, history)
 
 
 class FakeHistory:
@@ -257,6 +274,31 @@ def test_accounting_separates_funding_basis_and_fees():
     assert accounting["fees"] > 0
     assert accounting["basis"] < 0
     assert accounting["net"] < accounting["funding"]
+
+
+def test_accounting_cuenta_comisiones_de_cuatro_patas():
+    futures = FakeFutures(rate=0.0001)
+    runner = _runner(FakeScanner([FakeOpp(basis_pct=0.5)]), FakeExecutor(), futures)
+    runner.tick()
+    with runner._lock:
+        runner.state["position"]["opened_at"] -= 8 * 3600
+    futures.rate = -0.0001
+    runner.tick()
+    accounting = runner.get_state()["accounting"]
+    entry_fee_rate = FUNDING_MAKER_FEE if FUNDING_USE_MAKER else FUNDING_TAKER_FEE
+    expected = 2 * (entry_fee_rate + FUNDING_TAKER_FEE) * FUNDING_NOTIONAL_USDT
+    assert accounting["fees"] == pytest.approx(expected)
+
+
+def test_gate_recibe_fecha_de_funding_real():
+    opportunity = FakeOpp()
+    opportunity.next_funding_time = 1_800_000_000_000
+    gate = RecordingGate()
+    runner = _runner(
+        FakeScanner([opportunity]), FakeExecutor(), FakeFutures(), gate=gate
+    )
+    runner.tick()
+    assert gate.candidates[0].funding_time == opportunity.next_funding_time
 
 
 def test_tick_publishes_funding_metrics():
