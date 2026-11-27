@@ -67,6 +67,8 @@ class FundingExecutor:
             )
 
         if self.dry_run:
+            if spot.order_id is None:
+                spot.order_id = -1
             perp = OrderResult(
                 ok=True, side="SELL", symbol=symbol, quantity=quantity,
                 order_id=-1, status="DRY_RUN", filled_qty=quantity,

@@ -41,6 +41,16 @@ class FakeSpotExecutor:
         return {"status": "CANCELED"}
 
 
+class SimulatedSpotExecutor(FakeSpotExecutor):
+    def execute_order(self, side, quantity, symbol="BTCUSDT",
+                      order_type="MARKET", price=None, time_in_force=None):
+        result = super().execute_order(
+            side, quantity, symbol, order_type, price, time_in_force
+        )
+        result.order_id = None
+        return result
+
+
 class FakeFuturesClient:
     def __init__(self, *, fail_order=False, maker_status="FILLED"):
         self.fail_order = fail_order
@@ -83,6 +93,17 @@ def test_open_creates_hedged_position():
     assert result.position.is_hedged is True
     assert spot.calls == [("BUY", 0.01, "BTCUSDT")]
     assert futures.calls == []
+
+
+def test_open_dry_run_marks_both_legs_as_hedged_without_real_ids():
+    spot, futures = SimulatedSpotExecutor(), FakeFuturesClient()
+    result = FundingExecutor(spot, futures, dry_run=True).open(
+        "BTCUSDT", 0.01, 0.0001, mark_price=61000
+    )
+    assert result.ok is True
+    assert result.position.spot_order_id == -1
+    assert result.position.perp_order_id == -1
+    assert result.position.is_hedged is True
 
 
 def test_open_uses_isolated_margin_and_leverage_one():
