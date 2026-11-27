@@ -524,6 +524,204 @@
       ],
       "title": "WebSocket Connections",
       "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 48},
+      "id": 15,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "botbinance_funding_running",
+          "legendFormat": "Runner",
+          "refId": "A"
+        },
+        {
+          "expr": "botbinance_funding_persistence_trained",
+          "legendFormat": "Persistencia",
+          "refId": "B"
+        }
+      ],
+      "title": "Funding Runner / Persistencia",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 0}
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 48},
+      "id": 16,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "botbinance_funding_net_pnl_usd",
+          "legendFormat": "Funding neto",
+          "refId": "A"
+        }
+      ],
+      "title": "Funding P&L Neto (USD)",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"drawStyle": "line", "lineInterpolation": "smooth"},
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{"color": "green", "value": null}]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 48},
+      "id": 17,
+      "options": {
+        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+        "tooltip": {"mode": "single"}
+      },
+      "targets": [
+        {
+          "expr": "botbinance_funding_opportunities",
+          "legendFormat": "Oportunidades",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(botbinance_funding_decisions_total{result=\"allowed\"}[5m])",
+          "legendFormat": "Aceptadas/s",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(botbinance_funding_decisions_total{result=\"rejected\"}[5m])",
+          "legendFormat": "Rechazadas/s",
+          "refId": "C"
+        }
+      ],
+      "title": "Funding Gate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 56},
+      "id": 18,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "botbinance_funding_position_active",
+          "legendFormat": "Posición abierta",
+          "refId": "A"
+        },
+        {
+          "expr": "botbinance_funding_position_hedged",
+          "legendFormat": "Cubierta",
+          "refId": "B"
+        },
+        {
+          "expr": "increase(botbinance_funding_positions_closed_total[1h])",
+          "legendFormat": "Cierres 1h",
+          "refId": "C"
+        }
+      ],
+      "title": "Posición de Funding",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"drawStyle": "line", "lineInterpolation": "smooth"},
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{"color": "green", "value": null}]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 56},
+      "id": 19,
+      "options": {
+        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
+        "tooltip": {"mode": "single"}
+      },
+      "targets": [
+        {
+          "expr": "botbinance_funding_liquidation_pressure",
+          "legendFormat": "{{symbol}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Presión de Liquidaciones por Símbolo",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",
@@ -536,6 +734,6 @@
   "timezone": "",
   "title": "BotBinance Trading Dashboard",
   "uid": "botbinance-trading",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }
