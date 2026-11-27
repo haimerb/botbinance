@@ -6,13 +6,19 @@ export default function SymbolCard({ symbol, price, signal, position, active, on
   const isSell = consensus === 'SELL'
 
   return (
-    <div className={`symbol-card ${active ? 'active' : ''} ${isBuy ? 'sig-buy' : isSell ? 'sig-sell' : ''}`} onClick={onClick}>
-      <div className="symbol-card-top">
+    <button
+      type="button"
+      className={`symbol-card ${active ? 'active' : ''} ${isBuy ? 'sig-buy' : isSell ? 'sig-sell' : ''}`}
+      onClick={onClick}
+      aria-pressed={active}
+      aria-label={`Ver ${symbol}`}
+    >
+      <span className="symbol-card-top">
         <span className="symbol-card-name">{symbol.replace('USDT', '')}</span>
-        {position && <span className="symbol-card-pos" title="Posición abierta" />}
-      </div>
-      <div className="symbol-card-price mono">${priceNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-      <div className="symbol-card-sig">
+        {position && <span className="symbol-card-pos" role="img" aria-label="Posición abierta" />}
+      </span>
+      <span className="symbol-card-price mono">${priceNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+      <span className="symbol-card-sig">
         {isBuy ? (
           <span className="sig-badge buy">COMPRA</span>
         ) : isSell ? (
@@ -20,7 +26,7 @@ export default function SymbolCard({ symbol, price, signal, position, active, on
         ) : (
           <span className="sig-badge hold">—</span>
         )}
-      </div>
-    </div>
+      </span>
+    </button>
   )
 }
