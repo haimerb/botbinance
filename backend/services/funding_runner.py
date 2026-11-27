@@ -17,10 +17,14 @@ from src.config import (
     FUNDING_MIN_ANNUAL_PCT,
     FUNDING_MIN_FALLBACK_ANNUAL_PCT,
     FUNDING_MIN_INTERVALS,
+    FUNDING_MIN_PERSISTENCE_PROB,
     FUNDING_NOTIONAL_USDT,
+    FUNDING_PERSISTENCE_MIN_SAMPLES,
+    FUNDING_PERSISTENCE_TARGET_RATE,
     FUNDING_SYMBOLS,
     FUNDING_TAKER_FEE,
     FUNDING_USE_MAKER,
+    FUNDING_USE_PERSISTENCE,
 )
 from src.data.binance_futures_client import BinanceFuturesClient
 from src.data.funding_history import FundingHistoryClient
@@ -34,6 +38,7 @@ from src.strategy.funding_gate import (
     FundingGate,
     rank_candidates,
 )
+from src.strategy.funding_persistence import FundingPersistenceModel
 from src.strategy.funding_scanner import FundingScanner
 
 FUNDING_INTERVAL_MS = 8 * 3_600_000
@@ -67,6 +72,9 @@ class FundingRunner:
                 "max_zscore": FUNDING_MAX_ZSCORE,
                 "max_abs_basis_pct": FUNDING_MAX_BASIS_PCT,
                 "blackout_minutes": FUNDING_EVENT_BLACKOUT_MINUTES,
+                "persistence_enabled": FUNDING_USE_PERSISTENCE,
+                "min_persistence_prob": FUNDING_MIN_PERSISTENCE_PROB,
+                "persistence_trained": False,
             },
             "accounting": {
                 "funding": 0.0,
@@ -86,6 +94,7 @@ class FundingRunner:
         self._spot_executor = None
         self._history_client = None
         self._gate = None
+        self._persistence_trained = False
 
     def configure(self, *, api_key=None, api_secret=None, symbols=None):
         """Construye dependencias con credenciales del usuario."""
@@ -111,6 +120,9 @@ class FundingRunner:
             history_window=FUNDING_HISTORY_WINDOW,
             calendar=EconomicCalendar(
                 blackout_minutes=FUNDING_EVENT_BLACKOUT_MINUTES
+            ),
+            min_persistence_prob=(
+                FUNDING_MIN_PERSISTENCE_PROB if FUNDING_USE_PERSISTENCE else 0.0
             ),
         )
         with self._lock:
@@ -176,6 +188,7 @@ class FundingRunner:
                 self.state["last_error"] = result.error
 
     def _maybe_open(self):
+        self._ensure_persistence_model()
         opportunities = self._scanner.scan(self._symbols)
         if not opportunities:
             with self._lock:
@@ -257,6 +270,31 @@ class FundingRunner:
         elif not result.ok:
             with self._lock:
                 self.state["last_error"] = result.error
+
+    def _ensure_persistence_model(self):
+        if (self._gate is None or self._history_client is None
+                or not FUNDING_USE_PERSISTENCE or self._persistence_trained):
+            return
+        history_by_symbol = {}
+        limit = max(FUNDING_HISTORY_WINDOW * 10, 100)
+        for symbol in self._symbols:
+            try:
+                rows = self._history_client.funding(symbol, limit=limit)
+            except Exception:
+                continue
+            history_by_symbol[symbol] = [
+                float(row["fundingRate"]) for row in rows
+            ]
+        if not history_by_symbol:
+            return
+        model = FundingPersistenceModel(
+            target_rate=FUNDING_PERSISTENCE_TARGET_RATE,
+            min_samples=FUNDING_PERSISTENCE_MIN_SAMPLES,
+        ).fit(history_by_symbol)
+        self._gate.persistence_model = model
+        self._persistence_trained = True
+        with self._lock:
+            self.state["gate"]["persistence_trained"] = True
 
     def _funding_history(self, symbol):
         if self._history_client is None:
