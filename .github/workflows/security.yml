@@ -103,6 +103,8 @@ jobs:
 
       - name: Run GitLeaks secret scan
         uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
   test:
@@ -126,5 +128,8 @@ jobs:
           pip install pytest
 
       - name: Run tests
+        env:
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY || 'a2V5LXRlc3Qtbm8tcHJvZC0zMi1ieXRlcy1sb25nLWVub3VnaC1mb3ItdGVzdHM=' }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET || 'test-secret-for-ci-only-32-chars-minimum' }}
         run: |
           python -m pytest tests/ -q
