@@ -459,3 +459,31 @@ def test_tick_registra_fills_de_cierre():
     assert execution["fills"][0]["side"] == "BUY"
     assert state["position"] is None
     json.dumps(state, allow_nan=False)
+
+
+def test_tick_registra_punto_de_equity_al_abrir():
+    runner = _runner(FakeScanner([FakeOpp()]), FakeExecutor(), FakeFutures())
+    runner.tick()
+    accounting = runner.get_state()["accounting"]
+    assert len(accounting["equity"]) == 1
+    assert accounting["equity"][0]["action"] == "open"
+    assert accounting["equity"][0]["symbol"] == "BTCUSDT"
+    assert accounting["equity"][0]["net"] == pytest.approx(accounting["net"])
+    assert accounting["max_drawdown_usd"] >= 0
+    json.dumps(accounting, allow_nan=False)
+
+
+def test_drawdown_mantiene_el_pecho_desde_el_inicio():
+    runner = _runner(FakeScanner([FakeOpp()]), FakeExecutor(), FakeFutures())
+    with runner._lock:
+        accounting = runner.state["accounting"]
+        accounting["net"] = -4.0
+        runner._record_equity("open", "BTCUSDT")
+        accounting["net"] = -1.0
+        runner._record_equity("close", "BTCUSDT")
+    accounting = runner.get_state()["accounting"]
+    assert accounting["max_drawdown_usd"] == pytest.approx(4.0)
+    assert accounting["max_drawdown_pct"] == pytest.approx(
+        4.0 / FUNDING_NOTIONAL_USDT * 100
+    )
+    assert len(accounting["equity"]) == 2
