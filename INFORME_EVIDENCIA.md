@@ -70,9 +70,10 @@ Estado: prototipo de investigación. Este documento no es asesoramiento financie
 
 ## Evidencia operativa
 
-- `DRY_RUN=false python -m pytest tests/ -q` → `188 passed`, `14 warnings`.
+- `DRY_RUN=false python -m pytest tests/ -q` → `190 passed`, `14 warnings`.
 - CI del PR #153: `Security Scanning` y `Run Tests` completados con éxito.
 - `GET /api/funding/status` y WS exponen `execution.last_execution` y `execution.fills` para auditoría de fills y slippage por pata.
+- `paper_watch.py` agrega decisiones por etiqueta, toma la máxima presión de liquidación y muestra fills y slippage promedio.
 - Webhook de Alertmanager: `200` con token Bearer y `401` sin token.
 - Validación de payload JWT: REST devuelve `401` con `sub` no entero; handshake WS se rechaza con `4001` y el cliente observa `403`.
 - WS válido: recibe estado del bot correctamente.
