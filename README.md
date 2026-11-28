@@ -307,6 +307,12 @@ python paper_forward_report.py --resumen
 
 El reportero agrega snapshots con P&L, drawdown, fills y slippage a `evidence/paper_forward.jsonl` (gitignored). `--resumen` imprime el acumulado sin consultar el backend.
 
+Para dejarlo corriendo de forma continua con renovación automática de token local:
+
+```bash
+nohup bash scripts/paper_forward_loop.sh > evidence/paper_forward.log 2>&1 &
+```
+
 ---
 
 ## ✅ Tests
