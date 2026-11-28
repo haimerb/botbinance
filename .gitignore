@@ -60,6 +60,7 @@ out/
 # Registros y temporales
 *.log
 *.log.*
+evidence/*.jsonl
 *.tmp
 *.temp
 *.cache
