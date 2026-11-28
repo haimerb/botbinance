@@ -24,10 +24,24 @@ def peticion(url, token=None):
         return resp.read().decode("utf-8")
 
 
-def valor_metrica(texto, nombre):
+def valores_metrica(texto, nombre):
     patron = rf"^\s*{re.escape(nombre)}(?:\{{[^}}]*\}})?\s+([-+0-9.eE]+)\s*$"
-    coincide = re.search(patron, texto, re.MULTILINE)
-    return float(coincide.group(1)) if coincide else None
+    return [float(valor) for valor in re.findall(patron, texto, re.MULTILINE)]
+
+
+def valor_metrica(texto, nombre):
+    valores = valores_metrica(texto, nombre)
+    return valores[0] if valores else None
+
+
+def sumar_metrica(texto, nombre):
+    valores = valores_metrica(texto, nombre)
+    return sum(valores) if valores else None
+
+
+def maxima_metrica(texto, nombre):
+    valores = valores_metrica(texto, nombre)
+    return max(valores) if valores else None
 
 
 def resumen(estado, texto_metricas):
@@ -35,6 +49,13 @@ def resumen(estado, texto_metricas):
     mejor = max(oportunidades, key=lambda item: item.get("annual_net_pct") or 0, default=None)
     contabilidad = estado.get("accounting") or {}
     posicion = estado.get("position") or {}
+    execution = estado.get("execution") or {}
+    fills = execution.get("fills") or []
+    slippages = [
+        float(fill["slippage_bps"])
+        for fill in fills
+        if fill.get("slippage_bps") is not None
+    ]
     return {
         "estado": estado.get("status"),
         "ciclos": estado.get("cycles", 0),
@@ -44,9 +65,12 @@ def resumen(estado, texto_metricas):
         "posicion": posicion.get("symbol"),
         "cubierta": posicion.get("is_hedged"),
         "pnl_neto_usd": round(contabilidad.get("net", 0), 4),
-        "decisiones": valor_metrica(texto_metricas, "botbinance_funding_decisions_total"),
-        "errores": valor_metrica(texto_metricas, "botbinance_funding_errors_total"),
-        "presion_liquidacion": valor_metrica(texto_metricas, "botbinance_funding_liquidation_pressure"),
+        "decisiones": sumar_metrica(texto_metricas, "botbinance_funding_decisions_total"),
+        "errores": sumar_metrica(texto_metricas, "botbinance_funding_errors_total"),
+        "presion_liquidacion": maxima_metrica(texto_metricas, "botbinance_funding_liquidation_pressure"),
+        "ultima_ejecucion": execution.get("last_execution"),
+        "fills_registrados": len(fills),
+        "slippage_promedio_bps": round(sum(slippages) / len(slippages), 2) if slippages else None,
         "metricas_ok": all(nombre in texto_metricas for nombre in METRICAS),
     }
 
