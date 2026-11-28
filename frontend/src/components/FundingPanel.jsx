@@ -19,6 +19,11 @@ function formatScan(value) {
   return new Date(ms).toLocaleTimeString()
 }
 
+function formatBps(value) {
+  if (value === null || value === undefined || value === '') return '--'
+  return `${Number(value).toFixed(2)} bps`
+}
+
 function FundingPanel({ funding, error, onStart, onStop }) {
   const status = funding?.status || 'stopped'
   const running = status === 'running'
@@ -26,6 +31,16 @@ function FundingPanel({ funding, error, onStart, onStop }) {
   const position = funding?.position || null
   const accounting = funding?.accounting || {}
   const gate = funding?.gate || {}
+  const execution = funding?.execution || {}
+  const fills = execution.fills || []
+  const slippages = fills
+    .map((fill) => fill.slippage_bps)
+    .filter((value) => value !== null && value !== undefined && Number.isFinite(Number(value)))
+  const slippagePromedio = slippages.length
+    ? slippages.reduce((total, value) => total + Number(value), 0) / slippages.length
+    : null
+  const drawdownUsd = Number(accounting.max_drawdown_usd) || 0
+  const drawdownPct = Number(accounting.max_drawdown_pct) || 0
   const net = Number(accounting.net) || 0
 
   return (
@@ -79,6 +94,20 @@ function FundingPanel({ funding, error, onStart, onStop }) {
         <div className="stat-item">
           <span className="stat-label">P&L neto</span>
           <span className={`stat-value ${net >= 0 ? 'green' : 'red'}`}>{formatMoney(net)}</span>
+        </div>
+        <div className="stat-item">
+          <span className="stat-label">Drawdown</span>
+          <span className={`stat-value ${drawdownUsd > 0 ? 'red' : ''}`}>
+            {formatMoney(-drawdownUsd)} ({drawdownPct.toFixed(4)}%)
+          </span>
+        </div>
+        <div className="stat-item">
+          <span className="stat-label">Fills</span>
+          <span className="stat-value">{fills.length}</span>
+        </div>
+        <div className="stat-item">
+          <span className="stat-label">Slippage</span>
+          <span className="stat-value">{formatBps(slippagePromedio)}</span>
         </div>
       </div>
 
