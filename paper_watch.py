@@ -50,6 +50,7 @@ def resumen(estado, texto_metricas):
     contabilidad = estado.get("accounting") or {}
     posicion = estado.get("position") or {}
     execution = estado.get("execution") or {}
+    equity = contabilidad.get("equity") or []
     fills = execution.get("fills") or []
     slippages = [
         float(fill["slippage_bps"])
@@ -65,6 +66,9 @@ def resumen(estado, texto_metricas):
         "posicion": posicion.get("symbol"),
         "cubierta": posicion.get("is_hedged"),
         "pnl_neto_usd": round(contabilidad.get("net", 0), 4),
+        "drawdown_usd": round(contabilidad.get("max_drawdown_usd", 0), 4),
+        "drawdown_pct": round(contabilidad.get("max_drawdown_pct", 0), 4),
+        "puntos_equity": len(equity),
         "decisiones": sumar_metrica(texto_metricas, "botbinance_funding_decisions_total"),
         "errores": sumar_metrica(texto_metricas, "botbinance_funding_errors_total"),
         "presion_liquidacion": maxima_metrica(texto_metricas, "botbinance_funding_liquidation_pressure"),

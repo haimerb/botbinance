@@ -104,6 +104,9 @@ class FundingRunner:
                 "basis": 0.0,
                 "fees": 0.0,
                 "net": 0.0,
+                "equity": [],
+                "max_drawdown_usd": 0.0,
+                "max_drawdown_pct": 0.0,
             },
             "execution": {
                 "maker": FUNDING_USE_MAKER,
@@ -217,6 +220,7 @@ class FundingRunner:
                 )
                 accounting["fees"] += 2 * FUNDING_TAKER_FEE * FUNDING_NOTIONAL_USDT
                 self._recalculate_net()
+                self._record_equity("close", position["symbol"])
                 self.state["position"] = None
             else:
                 self.state["last_error"] = result.error
@@ -299,6 +303,7 @@ class FundingRunner:
                 accounting["basis"] -= basis_cost
                 accounting["fees"] += entry_fee
                 self._recalculate_net()
+                self._record_equity("open", best.symbol)
                 self.state["position"] = {
                     "symbol": result.position.symbol,
                     "quantity": result.position.quantity,
@@ -357,6 +362,29 @@ class FundingRunner:
         accounting = self.state["accounting"]
         accounting["net"] = round(
             accounting["funding"] + accounting["basis"] - accounting["fees"], 4
+        )
+
+    def _record_equity(self, action, symbol):
+        accounting = self.state["accounting"]
+        punto = {
+            "at": time.time(),
+            "action": action,
+            "symbol": symbol,
+            "net": round(float(accounting["net"] or 0), 4),
+        }
+        accounting["equity"] = (accounting["equity"] + [punto])[-100:]
+        pico = 0.0
+        max_drawdown = 0.0
+        for registro in accounting["equity"]:
+            net = float(registro.get("net", 0) or 0)
+            pico = max(pico, net)
+            max_drawdown = max(max_drawdown, pico - net)
+        accounting["max_drawdown_usd"] = round(max_drawdown, 4)
+        accounting["max_drawdown_pct"] = round(
+            max_drawdown / FUNDING_NOTIONAL_USDT * 100
+            if FUNDING_NOTIONAL_USDT
+            else 0.0,
+            4,
         )
 
     def _record_execution(self, result, action, symbol, reference_price=None):

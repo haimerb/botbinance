@@ -37,7 +37,12 @@ def test_resumen_con_oportunidad_y_posicion():
         "status": "running",
         "cycles": 12,
         "position": {"symbol": "SOLUSDT", "is_hedged": True},
-        "accounting": {"net": 0.71234},
+        "accounting": {
+            "net": 0.71234,
+            "equity": [{}, {}, {}],
+            "max_drawdown_usd": 0.0234,
+            "max_drawdown_pct": 0.0234,
+        },
         "gate": {"persistence_trained": True},
         "opportunities": [
             {"symbol": "BTCUSDT", "annual_net_pct": 0.12},
@@ -52,6 +57,9 @@ def test_resumen_con_oportunidad_y_posicion():
     assert resultado["posicion"] == "SOLUSDT"
     assert resultado["cubierta"] is True
     assert resultado["pnl_neto_usd"] == 0.7123
+    assert resultado["drawdown_usd"] == 0.0234
+    assert resultado["drawdown_pct"] == 0.0234
+    assert resultado["puntos_equity"] == 3
     assert resultado["metricas_ok"] is True
     assert resultado["decisiones"] == 1
 
@@ -63,6 +71,9 @@ def test_resumen_sin_oportunidades():
     assert resultado["mejor_neto_anual_pct"] == 0
     assert resultado["posicion"] is None
     assert resultado["metricas_ok"] is False
+    assert resultado["drawdown_usd"] == 0
+    assert resultado["drawdown_pct"] == 0
+    assert resultado["puntos_equity"] == 0
     assert resultado["ultima_ejecucion"] is None
     assert resultado["fills_registrados"] == 0
     assert resultado["slippage_promedio_bps"] is None
