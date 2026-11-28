@@ -77,6 +77,8 @@ def decode_token(token: str) -> dict:
         raise HTTPException(status_code=401, detail="Token expirado")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Token inválido")
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Token inválido")
 
 
 def decode_refresh_token(token: str) -> dict:

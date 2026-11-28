@@ -12,16 +12,19 @@ router = APIRouter(tags=["websocket"])
 @router.websocket("/api/ws")
 async def websocket_endpoint(ws: WebSocket):
     token = ws.query_params.get("token")
-    if not token:
+    if not isinstance(token, str) or not token:
         await ws.close(code=4001, reason="Token requerido")
         return
     try:
         current_user = decode_token(token)
-    except HTTPException:
+        user_id = current_user.get("sub")
+        if not isinstance(user_id, int):
+            raise ValueError("sub inválido")
+    except (HTTPException, KeyError, TypeError, ValueError):
         await ws.close(code=4001, reason="Token inválido")
         return
 
-    bot.ensure_user(current_user["sub"])
+    bot.ensure_user(user_id)
     await ws.accept()
     update_ws_connections(1)
     try:
