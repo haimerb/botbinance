@@ -70,10 +70,11 @@ Estado: prototipo de investigación. Este documento no es asesoramiento financie
 
 ## Evidencia operativa
 
-- `DRY_RUN=false python -m pytest tests/ -q` → `192 passed`, `14 warnings`.
+- `DRY_RUN=false python -m pytest tests/ -q` → `195 passed`, `14 warnings`.
 - CI del PR #153: `Security Scanning` y `Run Tests` completados con éxito.
 - `GET /api/funding/status` y WS exponen `execution.last_execution` y `execution.fills` para auditoría de fills y slippage por pata.
 - `paper_watch.py` agrega decisiones por etiqueta, toma la máxima presión de liquidación y muestra fills y slippage promedio.
+- `paper_forward_report.py` registra snapshots continuos en `evidence/paper_forward.jsonl` y resume P&L, drawdown, fills y slippage acumulados.
 - `accounting.equity` registra hasta 100 eventos de apertura/cierre; el drawdown se calcula frente al pico inicial y se expresa en USD y como porcentaje del notional.
 - Webhook de Alertmanager: `200` con token Bearer y `401` sin token.
 - Validación de payload JWT: REST devuelve `401` con `sub` no entero; handshake WS se rechaza con `4001` y el cliente observa `403`.
@@ -144,4 +145,4 @@ La ventana se mueve con el tiempo. Los valores de este informe corresponden al s
 
 ## Conclusión
 
-La evidencia disponible sostiene seguir validando en paper trading; no sostiene afirmar que el bot es rentable ni presentarlo como producto financiero probado. El próximo paso de evidencia es una ejecución paper continua usando los nuevos campos de fills y slippage, añadir drawdown y completar una revisión independiente.
+La evidencia disponible sostiene seguir validando en paper trading; no sostiene afirmar que el bot es rentable ni presentarlo como producto financiero probado. Ya existe un reportero continuo para acumular snapshots con drawdown, fills y slippage; siguen pendientes la revisión independiente y la medición con ejecución real o datos L2.
