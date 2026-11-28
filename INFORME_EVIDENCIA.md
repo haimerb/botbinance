@@ -63,14 +63,16 @@ Estado: prototipo de investigación. Este documento no es asesoramiento financie
 - El gate reduce pérdidas del carry simple de forma consistente: los `12/12` folds mejoran, pero eso no significa que los `12` folds sean rentables.
 - La mejora real frente al gate clásico es pequeña (`+0.3993 USD`) y no uniforme: `SOLUSDT` sigue negativo y solo `7/12` folds superan al clásico.
 - El resultado agregado es demasiado pequeño para cubrir incertidumbre operativa. No debe presentarse como retorno esperado.
-- La simulación no modela slippage, latencia, rechazos de órdenes, coste de oportunidad, endeudamiento, transferencias entre spot y futuros ni fallos de conectividad.
-- El backtest usa comisiones fijas por lado. El runner admite maker/taker configurables, pero el papel de maker real requiere medir fills con datos L2.
+- La simulación no modela latencia, rechazos de órdenes, coste de oportunidad, endeudamiento, transferencias entre spot y futuros ni fallos de conectividad.
+- El runner expone `execution.last_execution` y `execution.fills` con fills y slippage por pata, pero en `dry_run` esos fills son sintéticos y el slippage es cero o teórico. Medir slippage real requiere ejecución con datos L2.
+- El backtest usa comisiones fijas por lado. El runner admite maker/taker configurables, pero el papel de maker real requiere medir fills efectivos.
 - El notional es fijo y no hay capitalización entre folds. El P&L no equivale a un rendimiento anualizado de una cartera real.
 
 ## Evidencia operativa
 
-- `DRY_RUN=false python -m pytest tests/ -q` → `186 passed`, `14 warnings`.
+- `DRY_RUN=false python -m pytest tests/ -q` → `188 passed`, `14 warnings`.
 - CI del PR #153: `Security Scanning` y `Run Tests` completados con éxito.
+- `GET /api/funding/status` y WS exponen `execution.last_execution` y `execution.fills` para auditoría de fills y slippage por pata.
 - Webhook de Alertmanager: `200` con token Bearer y `401` sin token.
 - Validación de payload JWT: REST devuelve `401` con `sub` no entero; handshake WS se rechaza con `4001` y el cliente observa `403`.
 - WS válido: recibe estado del bot correctamente.
@@ -133,11 +135,11 @@ La ventana se mueve con el tiempo. Los valores de este informe corresponden al s
 ## Limitaciones y evidencia pendiente
 
 1. No hay auditoría independiente; estos números provienen del propio código del repositorio.
-2. No hay ejecución real ni paper forward continuo suficiente para estimar slippage y fills.
+2. No hay ejecución real; los fills y slippage del paper-forward son sintéticos hasta que se mida con órdenes reales o datos L2.
 3. No hay segunda ni tercera fuente externa que valide la tesis de funding.
 4. Market making y arbitraje multi-exchange requieren infraestructura, cuentas y capital adicionales.
 5. El prototipo es técnicamente funcional, pero el valor comercial sigue siendo bajo-medio hasta acumular evidencia externa y operativa.
 
 ## Conclusión
 
-La evidencia disponible sostiene seguir validando en paper trading; no sostiene afirmar que el bot es rentable ni presentarlo como producto financiero probado. El próximo paso de evidencia es una ejecución paper continua con métricas de fills, slippage y drawdown, seguida de una revisión independiente.
+La evidencia disponible sostiene seguir validando en paper trading; no sostiene afirmar que el bot es rentable ni presentarlo como producto financiero probado. El próximo paso de evidencia es una ejecución paper continua usando los nuevos campos de fills y slippage, añadir drawdown y completar una revisión independiente.

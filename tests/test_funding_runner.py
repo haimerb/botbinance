@@ -16,6 +16,7 @@ from src.config import (
     FUNDING_USE_MAKER,
 )
 from src.execution.funding_executor import FundingPosition
+from src.execution.trade_executor import OrderResult
 from src.strategy.funding_gate import FundingDecision, FundingGate
 
 
@@ -50,17 +51,55 @@ class FakeExecutor:
         from src.execution.funding_executor import FundingExecutionResult
         self.open_kwargs.append(kwargs)
         if not self.open_ok:
-            return FundingExecutionResult(ok=False, error="perp rechazado")
+            return FundingExecutionResult(
+                ok=False,
+                error="perp rechazado",
+                spot_result=OrderResult.failure("SELL", symbol, quantity, "perp rechazado"),
+                perp_result=OrderResult.failure("SELL", symbol, quantity, "perp rechazado"),
+            )
         return FundingExecutionResult(
             ok=True,
             position=FundingPosition(symbol, quantity, mark_price, rate,
                                      spot_order_id=1, perp_order_id=2),
+            spot_result=OrderResult(
+                ok=True, side="SELL", symbol=symbol, quantity=quantity,
+                order_id=1, status="DRY_RUN", filled_qty=quantity,
+                avg_price=mark_price,
+            ),
+            perp_result=OrderResult(
+                ok=True, side="SELL", symbol=symbol, quantity=quantity,
+                order_id=2, status="DRY_RUN", filled_qty=quantity,
+                avg_price=mark_price,
+            ),
         )
 
     def close(self, position):
         from src.execution.funding_executor import FundingExecutionResult
         self.closed.append(position)
-        return FundingExecutionResult(ok=bool(self.close_ok))
+        if not self.close_ok:
+            return FundingExecutionResult(
+                ok=False,
+                error="cierre rechazado",
+                spot_result=OrderResult.failure(
+                    "SELL", position.symbol, position.quantity, "cierre rechazado"
+                ),
+                perp_result=OrderResult.failure(
+                    "BUY", position.symbol, position.quantity, "cierre rechazado"
+                ),
+            )
+        return FundingExecutionResult(
+            ok=True,
+            spot_result=OrderResult(
+                ok=True, side="SELL", symbol=position.symbol,
+                quantity=position.quantity, order_id=3, status="DRY_RUN",
+                filled_qty=position.quantity, avg_price=position.entry_price,
+            ),
+            perp_result=OrderResult(
+                ok=True, side="BUY", symbol=position.symbol,
+                quantity=position.quantity, order_id=4, status="DRY_RUN",
+                filled_qty=position.quantity, avg_price=position.entry_price,
+            ),
+        )
 
 
 class FakeFutures:
@@ -387,4 +426,36 @@ def test_get_state_sanea_valores_no_finitos_anidados():
     state = runner.get_state()
     assert state["opportunities"][0]["annual_net_pct"] is None
     assert state["opportunities"][0]["score"] is None
+    json.dumps(state, allow_nan=False)
+
+
+def test_tick_registra_fills_y_slippage_de_apertura():
+    runner = _runner(FakeScanner([FakeOpp()]), FakeExecutor(), FakeFutures())
+    runner.tick()
+    state = runner.get_state()
+    execution = state["execution"]
+    assert execution["last_execution"]["action"] == "open"
+    assert execution["last_execution"]["mode"] == "dry_run"
+    assert execution["last_execution"]["legs"] == ["spot", "perp"]
+    assert [fill["leg"] for fill in execution["fills"]] == ["spot", "perp"]
+    assert all(fill["action"] == "open" for fill in execution["fills"])
+    assert all(fill["filled_qty"] == fill["requested_qty"] for fill in execution["fills"])
+    assert all(fill["slippage_bps"] == 0 for fill in execution["fills"])
+    json.dumps(state, allow_nan=False)
+
+
+def test_tick_registra_fills_de_cierre():
+    futures = FakeFutures()
+    runner = _runner(FakeScanner([FakeOpp()]), FakeExecutor(), futures)
+    runner.tick()
+    futures.rate = -0.0001
+    runner.tick()
+    state = runner.get_state()
+    execution = state["execution"]
+    assert execution["last_execution"]["action"] == "close"
+    assert execution["last_execution"]["legs"] == ["perp", "spot"]
+    assert execution["fills"][0]["action"] == "close"
+    assert execution["fills"][0]["leg"] == "perp"
+    assert execution["fills"][0]["side"] == "BUY"
+    assert state["position"] is None
     json.dumps(state, allow_nan=False)

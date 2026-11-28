@@ -109,6 +109,8 @@ class FundingRunner:
                 "maker": FUNDING_USE_MAKER,
                 "maker_timeout": FUNDING_MAKER_TIMEOUT_SECONDS,
                 "maker_offset": FUNDING_MAKER_PRICE_OFFSET,
+                "last_execution": None,
+                "fills": [],
             },
         }
         self._executor = None
@@ -199,6 +201,7 @@ class FundingRunner:
         if not should_close(rate, FUNDING_EXIT_IF_NEGATIVE):
             return
         result = self._executor.close(self._position_obj(position))
+        self._record_execution(result, "close", position["symbol"])
         with self._lock:
             if result.ok:
                 record_funding_position(position["symbol"], opened=False)
@@ -284,6 +287,7 @@ class FundingRunner:
             maker_offset=FUNDING_MAKER_PRICE_OFFSET,
             min_fallback_annual_pct=FUNDING_MIN_FALLBACK_ANNUAL_PCT,
         )
+        self._record_execution(result, "open", best.symbol, best.mark_price or None)
         if result.ok and result.position is not None:
             record_funding_position(result.position.symbol, opened=True)
             basis_cost = max(best.basis_pct or 0, 0) / 100 * FUNDING_NOTIONAL_USDT
@@ -354,6 +358,53 @@ class FundingRunner:
         accounting["net"] = round(
             accounting["funding"] + accounting["basis"] - accounting["fees"], 4
         )
+
+    def _record_execution(self, result, action, symbol, reference_price=None):
+        mode = "dry_run" if self.dry_run else (
+            "maker" if FUNDING_USE_MAKER else "taker"
+        )
+        fills = []
+        legs = (
+            ("perp", getattr(result, "perp_result", None)),
+            ("spot", getattr(result, "spot_result", None)),
+        ) if action == "close" else (
+            ("spot", getattr(result, "spot_result", None)),
+            ("perp", getattr(result, "perp_result", None)),
+        )
+        for leg, order in legs:
+            if order is None:
+                continue
+            avg_price = float(getattr(order, "avg_price", 0) or 0)
+            slippage_bps = None
+            if reference_price and avg_price:
+                slippage_bps = round(
+                    (avg_price / float(reference_price) - 1) * 10_000, 2
+                )
+            fills.append({
+                "at": time.time(),
+                "action": action,
+                "leg": leg,
+                "symbol": symbol,
+                "side": getattr(order, "side", None),
+                "status": getattr(order, "status", None),
+                "order_id": getattr(order, "order_id", None),
+                "requested_qty": round(float(getattr(order, "quantity", 0) or 0), 8),
+                "filled_qty": round(float(getattr(order, "filled_qty", 0) or 0), 8),
+                "avg_price": round(avg_price, 8) if avg_price else None,
+                "slippage_bps": slippage_bps,
+            })
+        with self._lock:
+            execution = self.state["execution"]
+            execution["fills"] = (fills + execution["fills"])[:50]
+            execution["last_execution"] = {
+                "at": time.time(),
+                "action": action,
+                "symbol": symbol,
+                "mode": mode,
+                "ok": bool(getattr(result, "ok", False)),
+                "error": getattr(result, "error", None),
+                "legs": [fill["leg"] for fill in fills],
+            }
 
     def _current_rate(self, symbol):
         data = self._futures_client.mark_price(symbol)
