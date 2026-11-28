@@ -19,6 +19,7 @@ Todo el código, la interfaz y los registros están en **español**.
 - **Gestión de riesgo**: stop-loss, take-profit, trailing stop, time-exit, take-profit parciales, tamaño máximo de posición y stop-loss adaptativo por ATR (opcional).
 - **Gestión de cartera**: reparto de capital entre símbolos (igual, inverso a la volatilidad, por volatilidad o por confianza ML).
 - **Backtesting** con comisiones, slippage, Sharpe/Sortino, max drawdown, profit factor y walk-forward.
+- **Informe de evidencia** con datos reales, límites y método reproducible: [INFORME_EVIDENCIA.md](INFORME_EVIDENCIA.md).
 - **Tareas asíncronas con Celery** (notificaciones, reportes diarios, limpieza de logs, backtests).
 - **Notificaciones** por Telegram/Discord (trades, circuit breaker, alertas de seguridad).
 - **Monitoring** con Prometheus + Grafana + Alertmanager.
@@ -303,7 +304,7 @@ El entrenamiento: descarga velas históricas → calcula ~30 features técnicas 
 DRY_RUN=false python -m pytest tests/ -q
 ```
 
-186 tests que cubren `src/strategy/ma_crossover.py`, `src/risk/risk_manager.py`, `src/backtest/engine.py`, `src/risk/portfolio_manager.py`, `src/strategy/sentiment.py`, `src/models/trainer.py`, `src/data/binance_client.py` (paginación de klines), el flujo de funding (históricos, gate, persistencia, runner y ejecución), autenticación con refresh tokens y validación de payload, webhook de alertas, ejecución de órdenes y sanidad del `trained_model.pkl` versionado.
+186 tests que cubren `src/strategy/ma_crossover.py`, `src/risk/risk_manager.py`, `src/backtest/engine.py`, `src/risk/portfolio_manager.py`, `src/strategy/sentiment.py`, `src/models/trainer.py`, `src/data/binance_client.py` (paginación de klines), el flujo de funding (históricos, gate, persistencia, walk-forward, runner y ejecución), autenticación con refresh tokens y validación de payload, webhook de alertas, ejecución de órdenes y sanidad del `trained_model.pkl` versionado.
 
 ---
 
